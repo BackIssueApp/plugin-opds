@@ -3,5 +3,6 @@
   "version": "1.0.1",
   "description": "OPDS catalog: browse, download, and page-stream the library from OPDS reader apps",
   "type": "module",
-  "private": true
+  "private": true,
+  "license": "GPL-3.0-or-later"
 }
