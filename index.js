@@ -34,6 +34,10 @@ export default async function register(api) {
     tier: 'viewer',
   });
 
+  // Show the user their OPDS catalog URL on the Profile page (only if the host
+  // supports client assets — older cores just skip it).
+  api.registerClientAsset?.({ js: 'client/ui.js', css: 'client/opds.css' });
+
   // Read-only catalog view — the plugin never writes. (The DB is already WAL
   // from core; a readonly handle can't set journal_mode, and doesn't need to.)
   const db = new Database(config.dbPath, { readonly: true });

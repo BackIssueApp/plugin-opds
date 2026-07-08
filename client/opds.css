@@ -1,0 +1,9 @@
+/* OPDS profile card — the catalog URL row. Uses core design tokens. */
+.opds-url { display: flex; gap: 8px; align-items: center; }
+.opds-url input {
+  flex: 1; min-width: 0; height: 34px; padding: 0 10px;
+  background: var(--ink); border: 1px solid var(--line); border-radius: 6px;
+  color: var(--text); font: 12px var(--font-mono, ui-monospace, monospace);
+}
+.opds-url input:focus { border-color: var(--accent); outline: none; }
+.opds-url .btn { height: 34px; }
