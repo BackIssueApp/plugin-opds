@@ -38,8 +38,10 @@ export default async function register(api) {
   // supports client assets — older cores just skip it).
   api.registerClientAsset?.({ js: 'client/ui.js', css: 'client/opds.css' });
 
-  // Read-only catalog view — the plugin never writes. (The DB is already WAL
+  // Read-only catalog view — this handle never writes. (The DB is already WAL
   // from core; a readonly handle can't set journal_mode, and doesn't need to.)
+  // The one thing the plugin records — streamed-page reading progress — goes
+  // through the reader plugin's own store below, never this connection.
   const db = new Database(config.dbPath, { readonly: true });
   try { db.pragma('busy_timeout = 5000'); } catch { /* readonly: best effort */ }
 
@@ -48,6 +50,35 @@ export default async function register(api) {
   let pages = null;
   try { pages = await import('../reader/pages.js'); } catch { /* downloads only */ }
   const streaming = !!pages;
+
+  // The reader plugin's progress store — the ONE writer of reading state. Page
+  // streaming infers progress from the pages an app fetches and records it
+  // through the reader's own semantics (forward-only, first-completion latch),
+  // so OPDS reading feeds "Continue reading", the apps, and reading stats
+  // exactly like the built-in reader. The catalog handle above stays readonly.
+  let readerStore = null;
+  try { readerStore = (await import('../reader/store.js')).openReaderStore(config.dbPath); } catch { /* no reader → no PSE either */ }
+
+  // Off by default only via Settings; a client can also opt out per-request
+  // with ?progress=0 on the stream URL.
+  api.registerSettings?.({ opdsSaveProgress: { type: 'bool' } });
+  const savingProgress = () => config.opdsSaveProgress !== false;
+
+  // Streamed-page progress inference. Deliberately FORWARD-ONLY: a fetch can
+  // advance the resume point but never move it back, which also defuses
+  // out-of-order prefetching. Completion uses the reader's latch (fires once,
+  // ever) when the final page is fetched.
+  function recordStreamedPage(userId, cvIssueId, n, pageCount) {
+    if (!readerStore || !savingProgress()) return;
+    try {
+      const cur = readerStore.progress(userId, cvIssueId);
+      const total = pageCount || cur.pages || 0;
+      const last = total > 0 && n >= total - 1;
+      if (n > (cur.page | 0) || (last && !cur.completed)) {
+        readerStore.saveProgress(userId, cvIssueId, { page: n, pages: total, completed: last });
+      }
+    } catch { /* progress is best-effort; never fail the page */ }
+  }
 
   const xml = (res, kind, body) => {
     res.set('Content-Type', kind);
@@ -105,24 +136,24 @@ export default async function register(api) {
   // Recently added issues (acquisition feed).
   api.registerRoute('get', '/api/opds/recent', (req, res) => {
     const rows = recentIssues(db, { includeRestricted: canRestricted(req), limit: PAGE_SIZE });
-    xml(res, ACQ, issuesAcqFeed(rows, { id: 'opds:recent', title: 'Recently added', self: '/api/opds/recent', streaming }));
+    xml(res, ACQ, issuesAcqFeed(rows, { id: 'opds:recent', title: 'Recently added', self: '/api/opds/recent', streaming, db, userId: uid(req) }));
   }, OPTS);
 
   // Reading shelves (per-user; empty/hidden when the reader plugin is absent).
   api.registerRoute('get', '/api/opds/continue', (req, res) => {
     const ids = readerContinue(db, uid(req), { limit: PAGE_SIZE });
     const rows = issuesByIds(db, ids, { includeRestricted: canRestricted(req) });
-    xml(res, ACQ, issuesAcqFeed(rows, { id: 'opds:continue', title: 'Continue reading', self: '/api/opds/continue', streaming }));
+    xml(res, ACQ, issuesAcqFeed(rows, { id: 'opds:continue', title: 'Continue reading', self: '/api/opds/continue', streaming, db, userId: uid(req) }));
   }, OPTS);
   api.registerRoute('get', '/api/opds/later', (req, res) => {
     const ids = readerLater(db, uid(req));
     const rows = issuesByIds(db, ids, { includeRestricted: canRestricted(req) });
-    xml(res, ACQ, issuesAcqFeed(rows, { id: 'opds:later', title: 'Read later', self: '/api/opds/later', streaming }));
+    xml(res, ACQ, issuesAcqFeed(rows, { id: 'opds:later', title: 'Read later', self: '/api/opds/later', streaming, db, userId: uid(req) }));
   }, OPTS);
 
   api.registerRoute('get', '/api/opds/series/:id', (req, res) => {
     if (!canRestricted(req) && seriesRestricted(db, Number(req.params.id))) return res.status(404).end();
-    const feed = seriesAcqFeed(db, Number(req.params.id), { streaming });
+    const feed = seriesAcqFeed(db, Number(req.params.id), { streaming, userId: uid(req) });
     if (!feed) return res.status(404).end();
     xml(res, ACQ, feed);
   }, OPTS);
@@ -189,13 +220,20 @@ export default async function register(api) {
       if (!f || !fs.existsSync(f.path)) return res.status(404).end();
       const n = Number(req.params.n) | 0;
       const w = Number(req.query.width || req.query.w) | 0;
+      // A page request is a reading signal (served fresh OR revalidated from
+      // the app's cache) — infer progress unless the client opted out.
+      const track = String(req.query.progress ?? '') !== '0';
       const etag = `"o${req.params.id}-${n}-${w}-${f.mtime || 0}"`;
-      if (req.headers['if-none-match'] === etag) return res.status(304).end();
+      if (req.headers['if-none-match'] === etag) {
+        if (track) recordStreamedPage(uid(req), Number(req.params.id), n, f.page_count | 0);
+        return res.status(304).end();
+      }
       const { buffer, contentType } = await pages.pageBufferResized(f.path, n, w, { webp: false });
       res.set('Content-Type', contentType);
       res.set('Cache-Control', 'private, max-age=86400');
       res.set('ETag', etag);
       res.send(buffer);
+      if (track) recordStreamedPage(uid(req), Number(req.params.id), n, f.page_count | 0);
     } catch (e) { res.status(500).json({ error: String(e?.message || e) }); }
   }, OPTS);
 }

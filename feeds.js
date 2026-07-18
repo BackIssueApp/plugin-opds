@@ -215,6 +215,21 @@ export function readerLater(db, userId) {
   } catch { return []; }
 }
 
+/** Per-user reading progress for a set of issues (reader plugin's table, via
+ *  this plugin's readonly handle): cvIssueId → { page, pages, completed,
+ *  updated_at }. Empty map when the reader isn't installed. Feeds use it to
+ *  stamp pse:lastRead on stream links so PSE apps resume where you left off. */
+export function progressFor(db, userId, cvIssueIds) {
+  const out = new Map();
+  if (!cvIssueIds.length || !hasReaderTables(db)) return out;
+  try {
+    const q = db.prepare(`SELECT issue_id, page, pages, completed, updated_at FROM reader_progress
+      WHERE user_id = ? AND issue_id IN (${cvIssueIds.map(() => '?').join(',')})`);
+    for (const r of q.all(userId, ...cvIssueIds)) out.set(r.issue_id, r);
+  } catch { /* reader mid-install */ }
+  return out;
+}
+
 // ---- misc helpers -----------------------------------------------------------
 export function bestFile(db, cvIssueId) {
   return db.prepare(`
@@ -332,7 +347,7 @@ export function publishersNavFeed(db, { includeRestricted = true } = {}) {
 
 // One acquisition entry per issue (download link + size, optional PSE stream
 // and cover). Shared by the per-series and shelf acquisition feeds.
-function issueEntry(i, { streaming }) {
+function issueEntry(i, { streaming, progress }) {
   const label = `#${i.issue_number ?? '?'}${i.title ? ` — ${i.title}` : ''}`;
   const updated = i.mtime ? new Date(i.mtime).toISOString().replace(/\.\d+Z$/, 'Z') : now();
   const links = [];
@@ -345,7 +360,16 @@ function issueEntry(i, { streaming }) {
   }
   links.push(`    <link rel="http://opds-spec.org/acquisition" href="${BASE}/issue/${i.cv_issue_id}/file" type="${fileType(i.path)}"${i.size ? ` length="${i.size}"` : ''}/>`);
   if (streaming && i.page_count > 0) {
-    links.push(`    <link rel="http://vaemendis.net/opds-pse/stream" type="image/jpeg" href="${BASE}/issue/${i.cv_issue_id}/page/{pageNumber}?width={maxWidth}" pse:count="${i.page_count}"/>`);
+    // pse:lastRead (1-based per the PSE spec; our page index is 0-based) lets
+    // PSE apps resume at the right page. Only stamped when there IS progress.
+    const p = progress?.get(i.cv_issue_id);
+    let pseExtra = '';
+    if (p && (p.page > 0 || p.completed)) {
+      const lastRead = p.completed ? i.page_count : Math.min(p.page + 1, i.page_count);
+      const when = p.updated_at ? ` pse:lastReadDate="${esc(p.updated_at)}"` : '';
+      pseExtra = ` pse:lastRead="${lastRead}"${when}`;
+    }
+    links.push(`    <link rel="http://vaemendis.net/opds-pse/stream" type="image/jpeg" href="${BASE}/issue/${i.cv_issue_id}/page/{pageNumber}?width={maxWidth}" pse:count="${i.page_count}"${pseExtra}/>`);
   }
   const summary = stripHtml(i.description);
   return `  <entry>
@@ -358,16 +382,20 @@ ${i.cover_date ? `    <dc:date xmlns:dc="http://purl.org/dc/elements/1.1/">${esc
 
 /** Acquisition feed for one series. `streaming` = the reader's page pipeline
  *  is loaded, enabling PSE links + our own cover/thumbnail routes. */
-export function seriesAcqFeed(db, seriesId, { streaming = false } = {}) {
+export function seriesAcqFeed(db, seriesId, { streaming = false, userId = null } = {}) {
   const title = seriesTitle(db, seriesId);
   if (title == null) return null;
-  const entries = issueRows(db, seriesId).map((i) => issueEntry(i, { streaming })).join('\n');
+  const rows = issueRows(db, seriesId);
+  const progress = userId != null ? progressFor(db, userId, rows.map((r) => r.cv_issue_id)) : null;
+  const entries = rows.map((i) => issueEntry(i, { streaming, progress })).join('\n');
   return head(`opds:series:${seriesId}`, title, `${BASE}/series/${seriesId}`, ACQ) + entries + '\n</feed>';
 }
 
 /** Acquisition feed from an arbitrary set of enriched issue rows (recently
- *  added, continue reading, read later). */
-export function issuesAcqFeed(rows, { id, title, self, streaming = false } = {}) {
-  const entries = (rows || []).map((i) => issueEntry(i, { streaming })).join('\n');
+ *  added, continue reading, read later). Pass `db` + `userId` to stamp
+ *  pse:lastRead resume points on the stream links. */
+export function issuesAcqFeed(rows, { id, title, self, streaming = false, db = null, userId = null } = {}) {
+  const progress = db && userId != null ? progressFor(db, userId, (rows || []).map((r) => r.cv_issue_id)) : null;
+  const entries = (rows || []).map((i) => issueEntry(i, { streaming, progress })).join('\n');
   return head(id, title, self, ACQ) + entries + '\n</feed>';
 }

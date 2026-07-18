@@ -1,6 +1,6 @@
 {
   "name": "backissue-opds",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "OPDS catalog: browse, download, and page-stream the library from OPDS reader apps",
   "type": "module",
   "private": true,

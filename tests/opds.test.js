@@ -205,3 +205,28 @@ test('helpers: bestFile, fileType, esc, downloadName, opensearchDoc', () => {
   assert.equal(downloadName(db, 101, '/lib/saga1.cbz'), 'Saga & Friends - #1.cbz');
   assert.match(opensearchDoc(), /template="\/api\/opds\/search\?q=\{searchTerms\}"/);
 });
+
+test('PSE stream links carry pse:lastRead resume points for the user', () => {
+  const db = seededDb();
+  db.exec(`
+    CREATE TABLE reader_progress (user_id INTEGER, issue_id INTEGER, page INTEGER DEFAULT 0,
+      pages INTEGER DEFAULT 0, completed INTEGER DEFAULT 0, updated_at TEXT, PRIMARY KEY (user_id, issue_id));
+    INSERT INTO reader_progress VALUES (7, 101, 13, 22, 0, '2026-07-18T10:00:00Z'); -- mid-read
+    INSERT INTO reader_progress VALUES (7, 102, 29, 30, 1, '2026-07-01T10:00:00Z'); -- finished
+    INSERT INTO reader_progress VALUES (9, 101, 3, 22, 0, '2026-07-18T11:00:00Z');  -- someone else
+  `);
+  const feed = seriesAcqFeed(db, 1, { streaming: true, userId: 7 });
+  // Mid-read: 0-based page 13 → 1-based lastRead 14, with the date stamped.
+  assert.match(feed, /issue\/101\/page\/\{pageNumber\}[^>]*pse:count="22" pse:lastRead="14" pse:lastReadDate="2026-07-18T10:00:00Z"/);
+  // Finished: lastRead = the full page count.
+  assert.match(feed, /issue\/102\/page\/\{pageNumber\}[^>]*pse:lastRead="30"/);
+  // No progress on #2 → no lastRead attribute at all.
+  assert.doesNotMatch(feed, /issue\/103\/page\/\{pageNumber\}[^>]*lastRead/);
+  // Another user sees THEIR resume point, not user 7's.
+  assert.match(seriesAcqFeed(db, 1, { streaming: true, userId: 9 }), /issue\/101\/page\/\{pageNumber\}[^>]*pse:lastRead="4"/);
+  // Without a userId (or reader tables), links are unchanged.
+  assert.doesNotMatch(seriesAcqFeed(db, 1, { streaming: true }), /lastRead/);
+  // Row-based feeds thread db + userId the same way.
+  const rows = issuesByIds(db, [101], { includeRestricted: true });
+  assert.match(issuesAcqFeed(rows, { id: 'x', title: 'x', self: '/x', streaming: true, db, userId: 7 }), /pse:lastRead="14"/);
+});
