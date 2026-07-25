@@ -13,10 +13,14 @@
 import {
   seriesRows, seriesCount, publishers, issueRows, seriesTitle, fileType, stripHtml, PAGE_SIZE,
 } from './feeds.js';
+import {
+  bookRows, bookCount, bookAuthors, bookSeries, ebookLibrariesList, bookMime,
+} from './feeds-books.js';
 
 export const OPDS2 = 'application/opds+json';
 const V1 = '/api/opds';        // the 1.2 catalog (for alternate links)
 const V2 = '/api/opds/v2';
+const EB = '/api/ebooks';      // the ebooks plugin's own file + cover routes
 const V1_NAV = 'application/atom+xml;profile=opds-catalog;kind=navigation';
 const ISO = (ms) => (ms ? new Date(ms).toISOString().replace(/\.\d+Z$/, 'Z') : undefined);
 
@@ -89,12 +93,13 @@ function facets(db, { includeRestricted, active = '' }) {
 }
 
 // ---- feeds ------------------------------------------------------------------
-export function rootDoc({ hasReader = false } = {}) {
+export function rootDoc({ hasReader = false, hasBooks = false } = {}) {
   const nav = [
     { title: 'All series', href: `${V2}/series`, type: OPDS2, rel: 'subsection' },
     { title: 'Recently added', href: `${V2}/recent`, type: OPDS2, rel: 'subsection' },
     { title: 'Publishers', href: `${V2}/publishers`, type: OPDS2, rel: 'subsection' },
   ];
+  if (hasBooks) nav.push({ title: 'Books', href: `${V2}/books`, type: OPDS2, rel: 'subsection' });
   if (hasReader) {
     nav.push({ title: 'Continue reading', href: `${V2}/continue`, type: OPDS2, rel: 'subsection' });
     nav.push({ title: 'Read later', href: `${V2}/later`, type: OPDS2, rel: 'subsection' });
@@ -156,4 +161,135 @@ export function seriesIssuesDoc(db, seriesId, { streaming = false } = {}) {
   const title = seriesTitle(db, seriesId);
   if (title == null) return null;
   return issuesDoc(issueRows(db, seriesId), { title, self: `${V2}/series/${seriesId}`, streaming });
+}
+
+// ---- ebooks (EPUB/PDF) — the same book queries, JSON shape. ---------------
+// Whole-book downloads and covers reuse the ebooks plugin's own routes under
+// /api/ebooks/…, identical to the 1.2 catalog — nothing is duplicated.
+
+// A book (ebook issue) → an acquirable publication (download link + cover).
+function bookPublication(b) {
+  const multi = b.series_count > 1 && b.series_title;
+  const pos = `#${b.issue_number ?? '?'}`;
+  const authors = String(b.author || '').split(',').map((a) => a.trim()).filter(Boolean);
+  return {
+    metadata: {
+      title: multi ? `${b.series_title} ${pos}${b.title && b.title !== b.series_title ? ` — ${b.title}` : ''}` : (b.title || 'Untitled'),
+      identifier: b.isbn ? `urn:isbn:${b.isbn}` : `backissue:book:${b.issue_id}`,
+      author: authors.length ? authors.map((name) => ({ name })) : undefined,
+      language: b.language || undefined,
+      published: b.year || undefined,
+      modified: b.added_at || undefined,
+      belongsTo: multi ? { series: { name: b.series_title, position: Number(b.issue_number) || undefined } } : undefined,
+      description: multi ? undefined : (stripHtml(b.series_description) || undefined),
+    },
+    links: [{
+      rel: 'http://opds-spec.org/acquisition',
+      href: `${EB}/issue/${b.issue_id}/file?dl=1`,
+      type: bookMime(b.format),
+      properties: b.size ? { size: b.size } : undefined,
+    }],
+    images: [{ href: `${EB}/issue/${b.issue_id}/cover` }],
+  };
+}
+
+function booksListDoc(rows, { title, self, total = null, page = 1 }) {
+  const links = [{ rel: 'self', href: self, type: OPDS2 }];
+  if (total != null) links.push(...pageLinks(self, page, PAGE_SIZE, total));
+  return {
+    metadata: { title, numberOfItems: total ?? (rows || []).length, itemsPerPage: PAGE_SIZE, currentPage: page },
+    links,
+    publications: (rows || []).map(bookPublication),
+  };
+}
+
+export function booksRootDoc(db, { includeRestricted = true } = {}) {
+  const nav = [
+    { title: 'All books', href: `${V2}/books/all`, type: OPDS2, rel: 'subsection' },
+    { title: 'Recently added', href: `${V2}/books/recent`, type: OPDS2, rel: 'subsection' },
+    { title: 'By author', href: `${V2}/books/authors`, type: OPDS2, rel: 'subsection' },
+    { title: 'By series', href: `${V2}/books/series`, type: OPDS2, rel: 'subsection' },
+  ];
+  if (ebookLibrariesList(db, { includeRestricted }).length > 1) {
+    nav.push({ title: 'Libraries', href: `${V2}/books/libraries`, type: OPDS2, rel: 'subsection' });
+  }
+  return { metadata: { title: 'Books' }, links: [{ rel: 'self', href: `${V2}/books`, type: OPDS2 }], navigation: nav };
+}
+
+export function allBooksDoc(db, { includeRestricted = true, page = 1 } = {}) {
+  const total = bookCount(db, { includeRestricted });
+  const rows = bookRows(db, { includeRestricted, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });
+  return booksListDoc(rows, { title: 'All books', self: `${V2}/books/all`, total, page });
+}
+
+export function recentBooksDoc(db, { includeRestricted = true } = {}) {
+  const rows = bookRows(db, { includeRestricted, order: 'ORDER BY ef.added_at DESC, i.id DESC', limit: PAGE_SIZE });
+  return booksListDoc(rows, { title: 'Recently added books', self: `${V2}/books/recent` });
+}
+
+export function bookAuthorsDoc(db, { includeRestricted = true } = {}) {
+  const rows = bookAuthors(db, { includeRestricted });
+  return {
+    metadata: { title: 'Books by author', numberOfItems: rows.length },
+    links: [{ rel: 'self', href: `${V2}/books/authors`, type: OPDS2 }],
+    navigation: rows.map((a) => ({
+      title: `${a.author} (${a.count})`, href: `${V2}/books/author/${encodeURIComponent(a.author)}`, type: OPDS2, rel: 'subsection',
+    })),
+  };
+}
+
+export function booksByAuthorDoc(db, author, { includeRestricted = true, page = 1 } = {}) {
+  const base = { conds: ['s.publisher = ?'], params: [author] };
+  const total = bookCount(db, { ...base, includeRestricted });
+  const rows = bookRows(db, { ...base, includeRestricted, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });
+  return booksListDoc(rows, { title: author, self: `${V2}/books/author/${encodeURIComponent(author)}`, total, page });
+}
+
+export function bookSeriesDoc(db, { includeRestricted = true } = {}) {
+  const rows = bookSeries(db, { includeRestricted });
+  return {
+    metadata: { title: 'Book series', numberOfItems: rows.length },
+    links: [{ rel: 'self', href: `${V2}/books/series`, type: OPDS2 }],
+    navigation: rows.map((s) => ({
+      title: `${s.title}${s.year ? ` (${s.year})` : ''} (${s.count})`, href: `${V2}/books/series/${s.id}`, type: OPDS2, rel: 'subsection',
+    })),
+  };
+}
+
+export function booksBySeriesDoc(db, seriesId, { includeRestricted = true } = {}) {
+  const rows = bookRows(db, {
+    conds: ['s.id = ?'], params: [Number(seriesId)], includeRestricted, limit: 10000,
+    order: 'ORDER BY CAST(i.issue_number AS REAL), i.issue_number COLLATE NOCASE',
+  });
+  if (!rows.length) return null;
+  return booksListDoc(rows, { title: rows[0].series_title, self: `${V2}/books/series/${seriesId}` });
+}
+
+export function bookLibrariesDoc(db, { includeRestricted = true } = {}) {
+  const rows = ebookLibrariesList(db, { includeRestricted });
+  return {
+    metadata: { title: 'Book libraries', numberOfItems: rows.length },
+    links: [{ rel: 'self', href: `${V2}/books/libraries`, type: OPDS2 }],
+    navigation: rows.map((l) => ({
+      title: `${l.name} (${l.count})`, href: `${V2}/books/library/${l.id}`, type: OPDS2, rel: 'subsection',
+    })),
+  };
+}
+
+export function booksByLibraryDoc(db, libId, { includeRestricted = true, page = 1 } = {}) {
+  const base = { conds: ['s.library_id = ?'], params: [Number(libId)] };
+  const total = bookCount(db, { ...base, includeRestricted });
+  if (!total) return null;
+  const rows = bookRows(db, { ...base, includeRestricted, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });
+  let name = 'Books';
+  try { name = db.prepare('SELECT name FROM libraries WHERE id = ?').get(Number(libId))?.name || name; } catch { /* older core */ }
+  return booksListDoc(rows, { title: name, self: `${V2}/books/library/${libId}`, total, page });
+}
+
+export function booksSearchDoc(db, { search = '', includeRestricted = true, page = 1 } = {}) {
+  const like = `%${search}%`;
+  const base = { conds: ['(i.title LIKE ? OR s.title LIKE ? OR s.publisher LIKE ?)'], params: [like, like, like] };
+  const total = bookCount(db, { ...base, includeRestricted });
+  const rows = bookRows(db, { ...base, includeRestricted, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });
+  return booksListDoc(rows, { title: `Book search: ${search}`, self: `${V2}/books/search?query=${encodeURIComponent(search)}`, total, page });
 }

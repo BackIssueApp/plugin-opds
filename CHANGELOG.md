@@ -8,6 +8,20 @@ by the maintainers when changes merge, so concurrent PRs don't conflict here.
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-07-25
+
+### Added
+- **Ebooks (EPUB/PDF) in the OPDS catalog.** When a Books library is present,
+  the catalog root gains a "Books" branch so ebook reader apps (KOReader,
+  Moon+ Reader, Thorium, Marvin, …) can browse and download it over OPDS —
+  All books (A–Z), Recently added, By author, By series, and per-library when
+  there is more than one book library. Each book is an acquisition entry with
+  its author(s), language, ISBN, cover, and a download link typed to the book's
+  format (`application/epub+zip` or `application/pdf`); on-demand books with no
+  file yet are listed too and download on first open. Search covers books.
+  Books are served over both the 1.2 (Atom) and 2.0 (JSON) catalogs, and are
+  shown only to readers whose role includes the Books-library permission.
+
 ## [1.2.0] — 2026-07-18
 
 ### Added

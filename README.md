@@ -28,4 +28,14 @@ follow the same visibility rules as the web app, and with the
 [Reader plugin](https://backissue.app/reading) installed the catalog adds
 per-user **Continue reading** / **Read later** shelves and page streaming.
 
+### Books (EPUB/PDF)
+
+With a **Books** library present, the catalog root gains a **Books** branch —
+browse all books, recently added, by author, by series, and per library, then
+download in EPUB or PDF from any ebook reader app. The download links point at
+the Books library's own file route, which the reader reaches with the very same
+HTTP Basic credentials it used for the catalog, so no second sign-in is needed.
+Books appear only for readers whose role includes the **Books library**
+permission (so a listed book is always one you can open).
+
 Full guide: <https://backissue.app/opds>

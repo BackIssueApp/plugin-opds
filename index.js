@@ -19,7 +19,14 @@ import {
 } from './feeds.js';
 import {
   rootDoc, seriesDoc, publishersDoc, issuesDoc, seriesIssuesDoc, OPDS2,
+  booksRootDoc, allBooksDoc, recentBooksDoc, bookAuthorsDoc, booksByAuthorDoc,
+  bookSeriesDoc, booksBySeriesDoc, bookLibrariesDoc, booksByLibraryDoc, booksSearchDoc,
 } from './feeds2.js';
+import {
+  hasEbookTables, bookCount, booksRootNavFeed, allBooksFeed, recentBooksFeed,
+  bookAuthorsNavFeed, booksByAuthorFeed, bookSeriesNavFeed, booksBySeriesFeed,
+  bookLibrariesNavFeed, booksByLibraryFeed, booksSearchFeed, booksOpensearchDoc,
+} from './feeds-books.js';
 import { roleGrants, CORE_PERMISSIONS } from '../../src/users.js';
 import { registeredPermissions } from '../../src/plugins.js';
 
@@ -101,6 +108,18 @@ export default async function register(api) {
     if (!req.user || req.user.id === 0) return true;
     try { return roleGrants(db, req.user.role, 'library.restricted', permCatalog); } catch { return false; }
   };
+  // Books ride the ebooks plugin's own permission — the acquisition link points
+  // at /api/ebooks/issue/:id/file (an ebooks.use route), so a reader who can't
+  // download a book must not be shown one. Absent the ebooks plugin, ebooks.use
+  // isn't in the catalog and this denies (there are no books to show anyway).
+  const canEbooks = (req) => {
+    if (!req.user || req.user.id === 0) return true;
+    try { return roleGrants(db, req.user.role, 'ebooks.use', permCatalog); } catch { return false; }
+  };
+  // Show the Books branch only when this reader may use it AND at least one
+  // book is visible to them.
+  const booksVisible = (req) => hasEbookTables(db) && canEbooks(req)
+    && bookCount(db, { includeRestricted: canRestricted(req) }) > 0;
   // Clamp a ?page param to a sane positive integer.
   const pageOf = (req) => Math.max(1, Number(req.query.page) || 1);
   const uid = (req) => (req.user && req.user.id) || 0;
@@ -108,7 +127,7 @@ export default async function register(api) {
   // Root menu (shelves) + the OpenSearch description document clients fetch to
   // wire up their search box.
   api.registerRoute('get', '/api/opds', (req, res) => {
-    xml(res, NAV, rootFeed({ hasReader: hasReaderTables(db) }));
+    xml(res, NAV, rootFeed({ hasReader: hasReaderTables(db), hasBooks: booksVisible(req) }));
   }, OPTS);
   api.registerRoute('get', '/api/opds/opensearch.xml', (req, res) => {
     xml(res, OSD_TYPE, opensearchDoc());
@@ -158,10 +177,69 @@ export default async function register(api) {
     xml(res, ACQ, feed);
   }, OPTS);
 
+  // ---- Ebooks (EPUB/PDF) branch — OPDS 1.2. --------------------------------
+  // Downloads + covers go through the ebooks plugin's own routes (which the
+  // reader reaches with the same HTTP Basic credentials — see auth note in the
+  // README). Every book route is gated on ebooks.use; without it the branch is
+  // invisible (404), so a reader is never shown a book it can't download.
+  const bookGate = (req, res) => {
+    if (!canEbooks(req)) { res.status(404).end(); return false; }
+    return true;
+  };
+  api.registerRoute('get', '/api/opds/books', (req, res) => {
+    if (!bookGate(req, res)) return;
+    xml(res, NAV, booksRootNavFeed(db, { includeRestricted: canRestricted(req) }));
+  }, OPTS);
+  api.registerRoute('get', '/api/opds/books/opensearch.xml', (req, res) => {
+    if (!bookGate(req, res)) return;
+    xml(res, OSD_TYPE, booksOpensearchDoc());
+  }, OPTS);
+  api.registerRoute('get', '/api/opds/books/search', (req, res) => {
+    if (!bookGate(req, res)) return;
+    const q = String(req.query.q || '').trim();
+    xml(res, ACQ, booksSearchFeed(db, { search: q, includeRestricted: canRestricted(req), page: pageOf(req) }));
+  }, OPTS);
+  api.registerRoute('get', '/api/opds/books/all', (req, res) => {
+    if (!bookGate(req, res)) return;
+    xml(res, ACQ, allBooksFeed(db, { includeRestricted: canRestricted(req), page: pageOf(req) }));
+  }, OPTS);
+  api.registerRoute('get', '/api/opds/books/recent', (req, res) => {
+    if (!bookGate(req, res)) return;
+    xml(res, ACQ, recentBooksFeed(db, { includeRestricted: canRestricted(req) }));
+  }, OPTS);
+  api.registerRoute('get', '/api/opds/books/authors', (req, res) => {
+    if (!bookGate(req, res)) return;
+    xml(res, NAV, bookAuthorsNavFeed(db, { includeRestricted: canRestricted(req) }));
+  }, OPTS);
+  api.registerRoute('get', '/api/opds/books/author/:name', (req, res) => {
+    if (!bookGate(req, res)) return;
+    xml(res, ACQ, booksByAuthorFeed(db, String(req.params.name), { includeRestricted: canRestricted(req), page: pageOf(req) }));
+  }, OPTS);
+  api.registerRoute('get', '/api/opds/books/series', (req, res) => {
+    if (!bookGate(req, res)) return;
+    xml(res, NAV, bookSeriesNavFeed(db, { includeRestricted: canRestricted(req) }));
+  }, OPTS);
+  api.registerRoute('get', '/api/opds/books/series/:id', (req, res) => {
+    if (!bookGate(req, res)) return;
+    const feed = booksBySeriesFeed(db, Number(req.params.id), { includeRestricted: canRestricted(req) });
+    if (!feed) return res.status(404).end();
+    xml(res, ACQ, feed);
+  }, OPTS);
+  api.registerRoute('get', '/api/opds/books/libraries', (req, res) => {
+    if (!bookGate(req, res)) return;
+    xml(res, NAV, bookLibrariesNavFeed(db, { includeRestricted: canRestricted(req) }));
+  }, OPTS);
+  api.registerRoute('get', '/api/opds/books/library/:id', (req, res) => {
+    if (!bookGate(req, res)) return;
+    const feed = booksByLibraryFeed(db, Number(req.params.id), { includeRestricted: canRestricted(req), page: pageOf(req) });
+    if (!feed) return res.status(404).end();
+    xml(res, ACQ, feed);
+  }, OPTS);
+
   // ---- OPDS 2.0 (JSON) — same catalog, JSON shape, mounted under /v2. -------
   // Whole-file downloads and PSE page images reuse the 1.2 routes below.
   api.registerRoute('get', '/api/opds/v2', (req, res) => {
-    json(res, rootDoc({ hasReader: hasReaderTables(db) }));
+    json(res, rootDoc({ hasReader: hasReaderTables(db), hasBooks: booksVisible(req) }));
   }, OPTS);
   api.registerRoute('get', '/api/opds/v2/search', (req, res) => {
     const q = String(req.query.query || req.query.q || '').trim();
@@ -191,6 +269,53 @@ export default async function register(api) {
   api.registerRoute('get', '/api/opds/v2/series/:id', (req, res) => {
     if (!canRestricted(req) && seriesRestricted(db, Number(req.params.id))) return res.status(404).end();
     const doc = seriesIssuesDoc(db, Number(req.params.id), { streaming });
+    if (!doc) return res.status(404).end();
+    json(res, doc);
+  }, OPTS);
+
+  // ---- Ebooks branch — OPDS 2.0 (JSON). Same queries, JSON shape. ----------
+  api.registerRoute('get', '/api/opds/v2/books', (req, res) => {
+    if (!bookGate(req, res)) return;
+    json(res, booksRootDoc(db, { includeRestricted: canRestricted(req) }));
+  }, OPTS);
+  api.registerRoute('get', '/api/opds/v2/books/search', (req, res) => {
+    if (!bookGate(req, res)) return;
+    const q = String(req.query.query || req.query.q || '').trim();
+    json(res, booksSearchDoc(db, { search: q, includeRestricted: canRestricted(req), page: pageOf(req) }));
+  }, OPTS);
+  api.registerRoute('get', '/api/opds/v2/books/all', (req, res) => {
+    if (!bookGate(req, res)) return;
+    json(res, allBooksDoc(db, { includeRestricted: canRestricted(req), page: pageOf(req) }));
+  }, OPTS);
+  api.registerRoute('get', '/api/opds/v2/books/recent', (req, res) => {
+    if (!bookGate(req, res)) return;
+    json(res, recentBooksDoc(db, { includeRestricted: canRestricted(req) }));
+  }, OPTS);
+  api.registerRoute('get', '/api/opds/v2/books/authors', (req, res) => {
+    if (!bookGate(req, res)) return;
+    json(res, bookAuthorsDoc(db, { includeRestricted: canRestricted(req) }));
+  }, OPTS);
+  api.registerRoute('get', '/api/opds/v2/books/author/:name', (req, res) => {
+    if (!bookGate(req, res)) return;
+    json(res, booksByAuthorDoc(db, String(req.params.name), { includeRestricted: canRestricted(req), page: pageOf(req) }));
+  }, OPTS);
+  api.registerRoute('get', '/api/opds/v2/books/series', (req, res) => {
+    if (!bookGate(req, res)) return;
+    json(res, bookSeriesDoc(db, { includeRestricted: canRestricted(req) }));
+  }, OPTS);
+  api.registerRoute('get', '/api/opds/v2/books/series/:id', (req, res) => {
+    if (!bookGate(req, res)) return;
+    const doc = booksBySeriesDoc(db, Number(req.params.id), { includeRestricted: canRestricted(req) });
+    if (!doc) return res.status(404).end();
+    json(res, doc);
+  }, OPTS);
+  api.registerRoute('get', '/api/opds/v2/books/libraries', (req, res) => {
+    if (!bookGate(req, res)) return;
+    json(res, bookLibrariesDoc(db, { includeRestricted: canRestricted(req) }));
+  }, OPTS);
+  api.registerRoute('get', '/api/opds/v2/books/library/:id', (req, res) => {
+    if (!bookGate(req, res)) return;
+    const doc = booksByLibraryDoc(db, Number(req.params.id), { includeRestricted: canRestricted(req), page: pageOf(req) });
     if (!doc) return res.status(404).end();
     json(res, doc);
   }, OPTS);

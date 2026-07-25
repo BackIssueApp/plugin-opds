@@ -29,7 +29,7 @@ export const PAGE_SIZE = 50;
 
 const BASE = '/api/opds';
 const OPENSEARCH = 'http://a9.com/-/spec/opensearch/1.1/';
-const now = () => new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+export const now = () => new Date().toISOString().replace(/\.\d+Z$/, 'Z');
 
 // Plain-text summary from a (possibly HTML) CV description, length-capped so a
 // feed entry stays small.
@@ -38,7 +38,10 @@ export const stripHtml = (s, max = 500) => {
   return t.length > max ? t.slice(0, max - 1).trimEnd() + '…' : t;
 };
 
-const head = (id, title, self, kind) => `<?xml version="1.0" encoding="UTF-8"?>
+// `search` is the OpenSearch descriptor a client wires its search box to —
+// defaults to the comic-series search; the ebook feeds pass their own so a
+// reader searching while browsing books gets book results.
+export const head = (id, title, self, kind, search = `${BASE}/opensearch.xml`) => `<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom" xmlns:opds="http://opds-spec.org/2010/catalog" xmlns:pse="http://vaemendis.net/opds-pse/ns" xmlns:opensearch="${OPENSEARCH}">
   <id>backissue:${esc(id)}</id>
   <title>${esc(title)}</title>
@@ -46,12 +49,12 @@ const head = (id, title, self, kind) => `<?xml version="1.0" encoding="UTF-8"?>
   <author><name>BackIssue</name></author>
   <link rel="self" href="${esc(self)}" type="${kind}"/>
   <link rel="start" href="${BASE}" type="${NAV}"/>
-  <link rel="search" type="${OSD}" href="${BASE}/opensearch.xml"/>
+  <link rel="search" type="${OSD}" href="${esc(search)}"/>
 `;
 
 // Paging + OpenSearch result-count links for a feed. `self` is the feed URL
 // without a page param (a query string is fine — the sep is chosen for it).
-function pageLinks(self, kind, page, size, total) {
+export function pageLinks(self, kind, page, size, total) {
   const sep = self.includes('?') ? '&' : '?';
   const url = (p) => `${self}${sep}page=${p}`;
   const last = Math.max(1, Math.ceil(total / size));
@@ -272,7 +275,7 @@ export function opensearchDoc() {
 </OpenSearchDescription>`;
 }
 
-export function rootFeed({ hasReader = false } = {}) {
+export function rootFeed({ hasReader = false, hasBooks = false } = {}) {
   const entry = (title, id, text, href, kind = NAV) => `  <entry>
     <title>${esc(title)}</title>
     <id>backissue:${esc(id)}</id>
@@ -285,6 +288,9 @@ export function rootFeed({ hasReader = false } = {}) {
     entry('Recently added', 'opds:recent', 'The latest issues added to the library', `${BASE}/recent`, ACQ),
     entry('Publishers', 'opds:publishers', 'Browse series by publisher', `${BASE}/publishers`),
   ];
+  // Ebooks (EPUB/PDF) live under their own branch — shown only when the Books
+  // library has at least one book (and the reader has the ebooks permission).
+  if (hasBooks) entries.push(entry('Books', 'opds:books', 'Browse the ebook (EPUB/PDF) library', `${BASE}/books`));
   if (hasReader) {
     entries.push(entry('Continue reading', 'opds:continue', 'Pick up where you left off', `${BASE}/continue`, ACQ));
     entries.push(entry('Read later', 'opds:later', 'Your read-later shelf', `${BASE}/later`, ACQ));
