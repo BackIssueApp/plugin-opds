@@ -275,7 +275,7 @@ export function opensearchDoc() {
 </OpenSearchDescription>`;
 }
 
-export function rootFeed({ hasReader = false, hasBooks = false } = {}) {
+export function rootFeed({ hasReader = false, hasBooks = false, hasLists = false } = {}) {
   const entry = (title, id, text, href, kind = NAV) => `  <entry>
     <title>${esc(title)}</title>
     <id>backissue:${esc(id)}</id>
@@ -291,6 +291,10 @@ export function rootFeed({ hasReader = false, hasBooks = false } = {}) {
   // Ebooks (EPUB/PDF) live under their own branch — shown only when the Books
   // library has at least one book (and the reader has the ebooks permission).
   if (hasBooks) entries.push(entry('Books', 'opds:books', 'Browse the ebook (EPUB/PDF) library', `${BASE}/books`));
+  // Reading lists / story arcs — shown when the reader has any to see.
+  if (hasLists) {
+    entries.push(entry('Reading lists', 'opds:lists', 'Your lists and story arcs, in reading order', `${BASE}/lists`));
+  }
   if (hasReader) {
     entries.push(entry('Continue reading', 'opds:continue', 'Pick up where you left off', `${BASE}/continue`, ACQ));
     entries.push(entry('Read later', 'opds:later', 'Your read-later shelf', `${BASE}/later`, ACQ));
@@ -404,4 +408,93 @@ export function issuesAcqFeed(rows, { id, title, self, streaming = false, db = n
   const progress = db && userId != null ? progressFor(db, userId, (rows || []).map((r) => r.cv_issue_id)) : null;
   const entries = (rows || []).map((i) => issueEntry(i, { streaming, progress })).join('\n');
   return head(id, title, self, ACQ) + entries + '\n</feed>';
+}
+
+const NL = String.fromCharCode(10);
+
+// ---- reading lists ----------------------------------------------------------
+// Lists (and imported story arcs) are stored IN READING ORDER, which is exactly
+// what an OPDS client needs to answer "what do I read next". A list is visible
+// to its owner and, once shared, to everyone.
+
+/** Lists this user may see: their own first, then shared ones. */
+export function visibleLists(db, userId) {
+  try {
+    return db.prepare(`
+      SELECT rl.id, rl.name, rl.public, (rl.user_id = ?) AS mine, u.username AS owner,
+             (SELECT COUNT(*) FROM reading_list_items li WHERE li.list_id = rl.id) AS items
+        FROM reading_lists rl
+        LEFT JOIN users u ON u.id = rl.user_id
+       WHERE rl.user_id = ? OR rl.public = 1
+       ORDER BY mine DESC, rl.created_at DESC`).all(userId, userId);
+  } catch { return []; } // older core without shared lists — no feed, no error
+}
+
+export function listMeta(db, userId, listId) {
+  try {
+    return db.prepare(`SELECT id, name, public, (user_id = ?) AS mine FROM reading_lists
+       WHERE id = ? AND (user_id = ? OR public = 1)`).get(userId, listId, userId) || null;
+  } catch { return null; }
+}
+
+/** One list's items IN LIST ORDER. Unlike issuesByIds this keeps items we do
+ *  NOT own — the reading order is the point, and a gap tells the reader what to
+ *  go and find. Owned items carry their file info so they stay downloadable. */
+export function listIssues(db, listId, { includeRestricted = true } = {}) {
+  const rows = db.prepare(`
+    SELECT li.position, li.cv_issue_id,
+           ci.issue_number, ci.name AS title, ci.cover_date, ci.image_url, ci.description,
+           cs.name AS series_title, s.restricted AS series_restricted,
+           lf.path, lf.size, lf.mtime, lf.page_count
+      FROM reading_list_items li
+      LEFT JOIN cv_issues ci ON ci.comicvine_id = li.cv_issue_id
+      LEFT JOIN cv_series cs ON cs.comicvine_id = ci.cv_series_id
+      LEFT JOIN series s ON s.cv_id = ci.cv_series_id
+      LEFT JOIN library_files lf ON lf.cv_issue_id = li.cv_issue_id AND lf.valid = 1
+     WHERE li.list_id = ?
+     GROUP BY li.cv_issue_id
+     ORDER BY li.position`).all(listId);
+  return includeRestricted ? rows : rows.filter((r) => !r.series_restricted);
+}
+
+/** Nav feed of the lists a user can see. */
+export function listsNavFeed(rows) {
+  const entries = (rows || []).map((l) => `  <entry>
+    <title>${esc(l.name)}${l.mine ? '' : esc(` (shared by ${l.owner || 'another user'})`)}</title>
+    <id>backissue:opds:list:${l.id}</id>
+    <updated>${now()}</updated>
+    <content type="text">${l.items} issue${l.items === 1 ? '' : 's'} in reading order</content>
+    <link rel="subsection" href="${BASE}/list/${l.id}" type="${ACQ}"/>
+  </entry>`).join(NL);
+  return head('opds:lists', 'Reading lists', `${BASE}/lists`, NAV)
+    + (entries ? entries + NL : '') + '</feed>';
+}
+
+/** Acquisition feed for one list, in reading order. Items not on the shelf
+ *  appear WITHOUT an acquisition link, so the order stays intact and the
+ *  reader can see what is missing. */
+export function listAcqFeed(rows, meta, { streaming = false, db = null, userId = null } = {}) {
+  const progress = db && userId != null
+    ? progressFor(db, userId, (rows || []).filter((r) => r.path).map((r) => r.cv_issue_id))
+    : null;
+  const entries = (rows || []).map((i, idx) => (i.path
+    ? issueEntry(i, { streaming, progress })
+    : missingEntry(i, idx))).join(NL);
+  return head(`opds:list:${meta.id}`, meta.name, `${BASE}/list/${meta.id}`, ACQ)
+    + (entries ? entries + NL : '') + '</feed>';
+}
+
+/** A list item nobody owns yet: no acquisition link, and the title says so, so
+ *  a client shows the slot instead of silently skipping it. */
+function missingEntry(i, idx) {
+  const label = `${i.series_title ? `${i.series_title} ` : ''}#${i.issue_number ?? '?'}${i.title ? ` — ${i.title}` : ''}`;
+  const thumb = i.image_url
+    ? `    <link rel="http://opds-spec.org/image/thumbnail" href="${esc(i.image_url)}"/>` + NL
+    : '';
+  return `  <entry>
+    <title>${esc(label)} (not on the shelf)</title>
+    <id>backissue:opds:listitem:${i.cv_issue_id || `slot${idx}`}</id>
+    <updated>${now()}</updated>
+    <content type="text">Next in reading order — this issue isn't in the library yet.</content>
+${thumb}  </entry>`;
 }

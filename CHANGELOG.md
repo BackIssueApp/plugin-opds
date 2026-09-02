@@ -8,6 +8,16 @@ by the maintainers when changes merge, so concurrent PRs don't conflict here.
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-09-02
+
+### Added
+- **Reading lists in the catalog.** A **Reading lists** section now appears in
+  the OPDS root, listing your own lists and story arcs plus any shared with
+  you. Opening one serves its issues **in reading order**, so a reader app can
+  answer "what do I read next" directly. Issues that aren't on the shelf yet
+  still appear in their place (without a download link), so the order stays
+  intact and gaps are visible. Read state rides along for apps that use it.
+
 ## [1.3.0] — 2026-07-25
 
 ### Added

@@ -11,6 +11,7 @@ import {
   seriesRows, seriesCount, publishers, recentIssues, issuesByIds,
   readerContinue, readerLater, hasReaderTables, downloadName,
   bestFile, fileType, esc,
+  visibleLists, listMeta, listIssues, listsNavFeed, listAcqFeed,
 } from '../feeds.js';
 
 function seededDb() {
@@ -229,4 +230,73 @@ test('PSE stream links carry pse:lastRead resume points for the user', () => {
   // Row-based feeds thread db + userId the same way.
   const rows = issuesByIds(db, [101], { includeRestricted: true });
   assert.match(issuesAcqFeed(rows, { id: 'x', title: 'x', self: '/x', streaming: true, db, userId: 7 }), /pse:lastRead="14"/);
+});
+
+// ---- reading lists ----------------------------------------------------------
+
+function withLists(db) {
+  db.exec(`
+    CREATE TABLE reading_lists (id INTEGER PRIMARY KEY, user_id INTEGER, name TEXT,
+      arc_cv_id INTEGER, created_at TEXT, public INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE reading_list_items (list_id INTEGER, position INTEGER, cv_issue_id INTEGER);
+    CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT);
+    INSERT INTO users VALUES (1,'alice'),(2,'bob');
+    -- alice's private list, and a shared arc she published
+    INSERT INTO reading_lists VALUES (1,1,'Alice private',NULL,'2026-01-01',0);
+    INSERT INTO reading_lists VALUES (2,1,'Crisis arc',555,'2026-01-02',1);
+    -- 101 and 201 are owned; 999 is not in the library at all
+    INSERT INTO reading_list_items VALUES (2,1,101),(2,2,999),(2,3,201);
+  `);
+  return db;
+}
+
+test('lists: a shared list is visible to another user; private ones are not', () => {
+  const db = withLists(seededDb());
+  const bob = visibleLists(db, 2).map((l) => l.name);
+  assert.deepEqual(bob, ['Crisis arc'], 'bob sees only the shared list');
+  const alice = visibleLists(db, 1).map((l) => l.name);
+  assert.deepEqual(alice, ['Crisis arc', 'Alice private'], 'alice sees both of hers, newest first');
+  assert.equal(listMeta(db, 2, 1), null, 'the private list is not addressable');
+  assert.equal(listMeta(db, 2, 2).name, 'Crisis arc');
+});
+
+test('lists: the feed keeps reading order and shows issues nobody owns', () => {
+  const db = withLists(seededDb());
+  const rows = listIssues(db, 2);
+  assert.deepEqual(rows.map((r) => r.cv_issue_id), [101, 999, 201], 'exact list order');
+  const xml = listAcqFeed(rows, listMeta(db, 2, 2), { streaming: false });
+  // Owned issues are acquirable; the missing one is a visible placeholder.
+  assert.ok(xml.includes('/api/opds/issue/101/file'), 'owned issue is downloadable');
+  assert.ok(xml.includes('/api/opds/issue/201/file'));
+  assert.ok(xml.includes('(not on the shelf)'), 'the gap is shown, not skipped');
+  assert.ok(!xml.includes('/api/opds/issue/999/file'), 'and is not offered for download');
+  // Order is preserved in the document itself.
+  assert.ok(xml.indexOf('issue:101') < xml.indexOf('listitem:999'));
+  assert.ok(xml.indexOf('listitem:999') < xml.indexOf('issue:201'));
+});
+
+test('lists: restricted issues drop out for roles without the permission', () => {
+  const db = withLists(seededDb());
+  // 301 belongs to the restricted 'Crossed' series (cv_series 800).
+  db.exec("INSERT INTO reading_list_items VALUES (2,4,301)");
+  const all = listIssues(db, 2, { includeRestricted: true });
+  assert.ok(all.some((r) => r.cv_issue_id === 301), 'a permitted reader sees it');
+  const safe = listIssues(db, 2, { includeRestricted: false });
+  assert.ok(!safe.some((r) => r.cv_issue_id === 301), 'others never do');
+});
+
+test('lists: the nav feed names the sharer, and the root feed links it only when there is one', () => {
+  const db = withLists(seededDb());
+  const nav = listsNavFeed(visibleLists(db, 2));
+  assert.ok(nav.includes('Crisis arc'), nav);
+  assert.ok(nav.includes('shared by alice'), 'a borrowed list says whose it is');
+  assert.ok(nav.includes('/api/opds/list/2'));
+  assert.ok(rootFeed({ hasLists: true }).includes('/api/opds/lists'));
+  assert.ok(!rootFeed({ hasLists: false }).includes('/api/opds/lists'), 'hidden when there are none');
+});
+
+test('lists: a database without the lists tables degrades quietly', () => {
+  const db = seededDb(); // no reading_lists at all
+  assert.deepEqual(visibleLists(db, 1), []);
+  assert.equal(listMeta(db, 1, 1), null);
 });

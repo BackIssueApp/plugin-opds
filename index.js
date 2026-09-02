@@ -15,6 +15,7 @@ import config from '../../src/config.js';
 import {
   rootFeed, opensearchDoc, seriesNavFeed, publishersNavFeed, seriesAcqFeed, issuesAcqFeed,
   recentIssues, issuesByIds, readerContinue, readerLater, hasReaderTables,
+  visibleLists, listMeta, listIssues, listsNavFeed, listAcqFeed,
   bestFile, fileType, downloadName, seriesRestricted, issueRestricted, PAGE_SIZE, NAV, ACQ,
 } from './feeds.js';
 import {
@@ -127,7 +128,7 @@ export default async function register(api) {
   // Root menu (shelves) + the OpenSearch description document clients fetch to
   // wire up their search box.
   api.registerRoute('get', '/api/opds', (req, res) => {
-    xml(res, NAV, rootFeed({ hasReader: hasReaderTables(db), hasBooks: booksVisible(req) }));
+    xml(res, NAV, rootFeed({ hasReader: hasReaderTables(db), hasBooks: booksVisible(req), hasLists: visibleLists(db, uid(req)).length > 0 }));
   }, OPTS);
   api.registerRoute('get', '/api/opds/opensearch.xml', (req, res) => {
     xml(res, OSD_TYPE, opensearchDoc());
@@ -168,6 +169,18 @@ export default async function register(api) {
     const ids = readerLater(db, uid(req));
     const rows = issuesByIds(db, ids, { includeRestricted: canRestricted(req) });
     xml(res, ACQ, issuesAcqFeed(rows, { id: 'opds:later', title: 'Read later', self: '/api/opds/later', streaming, db, userId: uid(req) }));
+  }, OPTS);
+
+  // Reading lists + imported story arcs, in reading order — the OPDS answer to
+  // "what should I read next". Own lists first, then any shared with everyone.
+  api.registerRoute('get', '/api/opds/lists', (req, res) => {
+    xml(res, NAV, listsNavFeed(visibleLists(db, uid(req))));
+  }, OPTS);
+  api.registerRoute('get', '/api/opds/list/:id', (req, res) => {
+    const meta = listMeta(db, uid(req), Number(req.params.id));
+    if (!meta) return res.status(404).end();
+    const rows = listIssues(db, Number(req.params.id), { includeRestricted: canRestricted(req) });
+    xml(res, ACQ, listAcqFeed(rows, meta, { streaming, db, userId: uid(req) }));
   }, OPTS);
 
   api.registerRoute('get', '/api/opds/series/:id', (req, res) => {
