@@ -1,0 +1,24 @@
+{
+  "progressSyncTitle": "OPDS 进度同步",
+  "progressSyncIntro": "逐页串流会更新阅读进度，因此 OPDS 应用可以跨设备继续阅读，并计为真实阅读。",
+  "progressSyncNote": "从 OPDS 应用串流页面会推进继续阅读的位置（不会后退）；获取最后一页会将该期标记为已读——与内置阅读器保存的是同一条记录。整文件下载不受影响（它们没有进度通道）。客户端可以在串流地址后加上 <code>?progress=0</code>，按请求关闭此功能。",
+  "connectTitle": "连接阅读器应用（OPDS）",
+  "connectNote": "将此目录添加到支持 OPDS 的阅读器应用，即可在其中浏览和串流你的书库。使用 BackIssue 用户名和密码登录。",
+  "copy": "复制",
+  "copied": "已复制 OPDS 地址。",
+  "_shared": {
+    "plugins": {
+      "opds": {
+        "description": "OPDS 目录：在 OPDS 阅读器应用中浏览、下载和逐页串流书库"
+      }
+    },
+    "permissions": {
+      "opds": {
+        "use": {
+          "label": "OPDS 目录",
+          "description": "在 OPDS 阅读器应用中搜索、浏览、下载和串流书库"
+        }
+      }
+    }
+  }
+}
