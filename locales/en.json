@@ -5,5 +5,20 @@
   "connectTitle": "Connect a reader app (OPDS)",
   "connectNote": "Add this catalog to an OPDS-capable reader app to browse and stream your library there. Sign in with your BackIssue username and password.",
   "copy": "Copy",
-  "copied": "OPDS URL copied."
+  "copied": "OPDS URL copied.",
+  "_shared": {
+    "plugins": {
+      "opds": {
+        "description": "OPDS catalog: browse, download, and page-stream the library from OPDS reader apps"
+      }
+    },
+    "permissions": {
+      "opds": {
+        "use": {
+          "label": "OPDS catalog",
+          "description": "Search, browse, download, and stream the library from OPDS reader apps"
+        }
+      }
+    }
+  }
 }

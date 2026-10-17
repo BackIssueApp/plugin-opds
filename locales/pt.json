@@ -5,5 +5,20 @@
   "connectTitle": "Ligar uma app de leitura (OPDS)",
   "connectNote": "Adicione este catálogo a uma app de leitura compatível com OPDS para navegar e fazer streaming da sua biblioteca a partir dela. Inicie sessão com o nome de utilizador e a palavra-passe do BackIssue.",
   "copy": "Copiar",
-  "copied": "URL OPDS copiado."
+  "copied": "URL OPDS copiado.",
+  "_shared": {
+    "plugins": {
+      "opds": {
+        "description": "Catálogo OPDS: explorar, descarregar e ler a biblioteca página a página a partir de aplicações de leitura OPDS"
+      }
+    },
+    "permissions": {
+      "opds": {
+        "use": {
+          "label": "Catálogo OPDS",
+          "description": "Pesquisar, explorar, descarregar e reproduzir a biblioteca a partir de aplicações OPDS"
+        }
+      }
+    }
+  }
 }

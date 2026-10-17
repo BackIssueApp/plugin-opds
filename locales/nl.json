@@ -5,5 +5,20 @@
   "connectTitle": "Een reader-app verbinden (OPDS)",
   "connectNote": "Voeg deze catalogus toe aan een OPDS-compatibele reader-app om je bibliotheek daar te bekijken en te streamen. Meld je aan met je BackIssue-gebruikersnaam en -wachtwoord.",
   "copy": "Kopiëren",
-  "copied": "OPDS-URL gekopieerd."
+  "copied": "OPDS-URL gekopieerd.",
+  "_shared": {
+    "plugins": {
+      "opds": {
+        "description": "OPDS-catalogus: de bibliotheek bekijken, downloaden en pagina voor pagina streamen vanuit OPDS-lezers"
+      }
+    },
+    "permissions": {
+      "opds": {
+        "use": {
+          "label": "OPDS-catalogus",
+          "description": "De bibliotheek doorzoeken, bekijken, downloaden en streamen vanuit OPDS-lezers"
+        }
+      }
+    }
+  }
 }

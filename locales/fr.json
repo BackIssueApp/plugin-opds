@@ -5,5 +5,20 @@
   "connectTitle": "Connecter une application de lecture (OPDS)",
   "connectNote": "Ajoutez ce catalogue à une application de lecture compatible OPDS pour y parcourir et diffuser votre bibliothèque. Connectez-vous avec votre nom d'utilisateur et votre mot de passe BackIssue.",
   "copy": "Copier",
-  "copied": "URL OPDS copiée."
+  "copied": "URL OPDS copiée.",
+  "_shared": {
+    "plugins": {
+      "opds": {
+        "description": "Catalogue OPDS : parcourir, télécharger et lire page par page la bibliothèque depuis des applications de lecture OPDS"
+      }
+    },
+    "permissions": {
+      "opds": {
+        "use": {
+          "label": "Catalogue OPDS",
+          "description": "Rechercher, parcourir, télécharger et lire la bibliothèque depuis des applications OPDS"
+        }
+      }
+    }
+  }
 }
