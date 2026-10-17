@@ -1,0 +1,9 @@
+{
+  "progressSyncTitle": "OPDS-Lesefortschritt synchronisieren",
+  "progressSyncIntro": "Seiten-Streaming aktualisiert den Lesefortschritt, sodass OPDS-Apps geräteübergreifend fortsetzen und als echtes Lesen zählen.",
+  "progressSyncNote": "Das Streamen einer Seite aus einer OPDS-App setzt die Fortsetzungsstelle vor (nie zurück); das Abrufen der letzten Seite markiert das Heft als gelesen — derselbe Eintrag, den der integrierte Reader führt. Downloads ganzer Dateien bleiben unberührt (dafür gibt es keinen Fortschrittskanal). Ein Client kann sich pro Anfrage mit <code>?progress=0</code> in der Stream-URL abmelden.",
+  "connectTitle": "Reader-App verbinden (OPDS)",
+  "connectNote": "Diesen Katalog in einer OPDS-fähigen Reader-App hinzufügen, um die Bibliothek dort zu durchstöbern und zu streamen. Anmeldung mit dem BackIssue-Benutzernamen und -Passwort.",
+  "copy": "Kopieren",
+  "copied": "OPDS-URL kopiert."
+}

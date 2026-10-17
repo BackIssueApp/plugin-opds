@@ -1,0 +1,9 @@
+{
+  "progressSyncTitle": "Sincronizar el progreso por OPDS",
+  "progressSyncIntro": "La transmisión de páginas actualiza el progreso de lectura, así las apps OPDS retoman donde lo dejaste en cualquier dispositivo y cuentan como lectura real.",
+  "progressSyncNote": "Transmitir una página desde una app OPDS adelanta tu punto de reanudación (nunca hacia atrás); obtener la última página marca el número como leído — el mismo registro que guarda el lector integrado. Las descargas de archivos completos no se ven afectadas (no existe un canal de progreso para ellas). Un cliente puede desactivarlo por petición con <code>?progress=0</code> en la URL de transmisión.",
+  "connectTitle": "Conectar una app de lectura (OPDS)",
+  "connectNote": "Añade este catálogo a una app de lectura compatible con OPDS para explorar y transmitir tu biblioteca desde ella. Inicia sesión con tu usuario y contraseña de BackIssue.",
+  "copy": "Copiar",
+  "copied": "URL de OPDS copiada."
+}

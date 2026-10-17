@@ -1,0 +1,9 @@
+{
+  "progressSyncTitle": "OPDS-voortgang synchroniseren",
+  "progressSyncIntro": "Pagina's streamen werkt je leesvoortgang bij, zodat OPDS-apps op elk apparaat verdergaan waar je was en meetellen als echt lezen.",
+  "progressSyncNote": "Een pagina streamen vanuit een OPDS-app zet je hervatpunt vooruit (nooit terug); de laatste pagina ophalen markeert het nummer als gelezen — hetzelfde record dat de ingebouwde reader bijhoudt. Downloads van hele bestanden blijven buiten beschouwing (daar is geen voortgangskanaal voor). Een client kan zich per verzoek afmelden met <code>?progress=0</code> in de stream-URL.",
+  "connectTitle": "Een reader-app verbinden (OPDS)",
+  "connectNote": "Voeg deze catalogus toe aan een OPDS-compatibele reader-app om je bibliotheek daar te bekijken en te streamen. Meld je aan met je BackIssue-gebruikersnaam en -wachtwoord.",
+  "copy": "Kopiëren",
+  "copied": "OPDS-URL gekopieerd."
+}

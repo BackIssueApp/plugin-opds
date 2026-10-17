@@ -1,0 +1,9 @@
+{
+  "progressSyncTitle": "Sincronizzazione dei progressi OPDS",
+  "progressSyncIntro": "Lo streaming delle pagine aggiorna i progressi di lettura, così le app OPDS riprendono da dove eri su ogni dispositivo e contano come lettura vera e propria.",
+  "progressSyncNote": "Lo streaming di una pagina da un'app OPDS fa avanzare il punto di ripresa (mai indietro); scaricare l'ultima pagina segna l'albo come letto — lo stesso record che tiene il lettore integrato. I download di file interi non sono interessati (per loro non esiste un canale di progresso). Un client può rinunciare per singola richiesta con <code>?progress=0</code> nell'URL dello stream.",
+  "connectTitle": "Collega un'app di lettura (OPDS)",
+  "connectNote": "Aggiungi questo catalogo a un'app di lettura compatibile OPDS per sfogliare e riprodurre in streaming la tua biblioteca da lì. Accedi con il nome utente e la password di BackIssue.",
+  "copy": "Copia",
+  "copied": "URL OPDS copiato."
+}

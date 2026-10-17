@@ -8,6 +8,14 @@ by the maintainers when changes merge, so concurrent PRs don't conflict here.
 
 ## [Unreleased]
 
+### Added
+
+- **Translated UI.** The progress-sync card and the profile page's
+  "Connect a reader app" block follow the language picked under Profile →
+  Language on BackIssue builds newer than 0.9.0, and stay English on older
+  ones. Translations ship for French, German, Spanish, Italian, Portuguese and
+  Dutch in `locales/`. Feed titles are unchanged.
+
 ## [1.4.0] — 2026-09-02
 
 ### Added
