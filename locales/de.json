@@ -4,6 +4,7 @@
   "progressSyncNote": "Das Streamen einer Seite aus einer OPDS-App setzt die Fortsetzungsstelle vor (nie zurück); das Abrufen der letzten Seite markiert das Heft als gelesen — derselbe Eintrag, den der integrierte Reader führt. Downloads ganzer Dateien bleiben unberührt (dafür gibt es keinen Fortschrittskanal). Ein Client kann sich pro Anfrage mit <code>?progress=0</code> in der Stream-URL abmelden.",
   "connectTitle": "Reader-App verbinden (OPDS)",
   "connectNote": "Diesen Katalog in einer OPDS-fähigen Reader-App hinzufügen, um die Bibliothek dort zu durchstöbern und zu streamen. Anmeldung mit dem BackIssue-Benutzernamen und -Passwort.",
+  "connectNoteApiKey": "Füge diesen Katalog einer OPDS-fähigen Lese-App hinzu, um deine Bibliothek dort zu durchsuchen und zu streamen. Die Anmeldung per Passwort ist auf diesem Server ausgeschaltet: Melde dich mit deinem Benutzernamen und als Passwort mit einem persönlichen Schlüssel aus <b>API-Schlüssel</b> auf dieser Seite an.",
   "copy": "Kopieren",
   "copied": "OPDS-URL kopiert.",
   "_shared": {

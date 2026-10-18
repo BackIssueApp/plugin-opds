@@ -4,6 +4,7 @@
   "progressSyncNote": "Diffuser une page depuis une application OPDS avance votre point de reprise (jamais en arrière) ; récupérer la dernière page marque le numéro comme lu — c'est le même enregistrement que celui du lecteur intégré. Les téléchargements de fichiers entiers ne sont pas concernés (ils n'ont pas de canal de progression). Un client peut se désinscrire par requête avec <code>?progress=0</code> dans l'URL du flux.",
   "connectTitle": "Connecter une application de lecture (OPDS)",
   "connectNote": "Ajoutez ce catalogue à une application de lecture compatible OPDS pour y parcourir et diffuser votre bibliothèque. Connectez-vous avec votre nom d'utilisateur et votre mot de passe BackIssue.",
+  "connectNoteApiKey": "Ajoutez ce catalogue à une application de lecture compatible OPDS pour y parcourir et lire votre bibliothèque. La connexion par mot de passe est désactivée sur ce serveur : connectez-vous avec votre nom d’utilisateur et, comme mot de passe, une clé personnelle créée sous <b>Clé API</b> sur cette page.",
   "copy": "Copier",
   "copied": "URL OPDS copiée.",
   "_shared": {

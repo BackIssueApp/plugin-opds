@@ -8,6 +8,14 @@ by the maintainers when changes merge, so concurrent PRs don't conflict here.
 
 ## [Unreleased]
 
+### Changed
+
+- **The Profile card says to use an API key when passwords are off.** On a
+  server with password sign-in turned off, the **Connect a reader app** card
+  now tells you to sign in with your username and a personal API key instead
+  of your password. Needs BackIssue 0.9.2 or newer; older servers keep the
+  usual note.
+
 ### Fixed
 
 - **Hide mature content applies to the catalog.** An account that switched

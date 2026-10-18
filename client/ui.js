@@ -50,6 +50,13 @@
     slot.appendChild(card);
     const input = card.querySelector('#opds-url');
     input.onclick = () => input.select();
+    // With password sign-in off, a reader app gets in with a personal API
+    // key as the password instead. Only cores that accept that (0.9.2+)
+    // advertise apiKeyBasic, so older ones keep the plain note.
+    Promise.resolve(api.get?.('/api/auth/providers')).then((p) => {
+      if (!p || p.passwordLogin !== false || !p.apiKeyBasic) return;
+      card.querySelector('.modal__note').innerHTML = trh('connectNoteApiKey', 'Add this catalog to an OPDS-capable reader app to browse and stream your library there. Password sign-in is off on this server: sign in with your username and, as the password, a personal key from <b>API key</b> on this page.');
+    }).catch(() => { /* keep the plain note */ });
     card.querySelector('#opds-copy').onclick = async () => {
       try { await navigator.clipboard.writeText(url); if (api.toast) api.toast(tr('copied', 'OPDS URL copied.'), 'ok'); }
       catch { input.select(); try { document.execCommand('copy'); } catch { /* manual copy */ } }

@@ -4,6 +4,7 @@
   "progressSyncNote": "Een pagina streamen vanuit een OPDS-app zet je hervatpunt vooruit (nooit terug); de laatste pagina ophalen markeert het nummer als gelezen — hetzelfde record dat de ingebouwde reader bijhoudt. Downloads van hele bestanden blijven buiten beschouwing (daar is geen voortgangskanaal voor). Een client kan zich per verzoek afmelden met <code>?progress=0</code> in de stream-URL.",
   "connectTitle": "Een reader-app verbinden (OPDS)",
   "connectNote": "Voeg deze catalogus toe aan een OPDS-compatibele reader-app om je bibliotheek daar te bekijken en te streamen. Meld je aan met je BackIssue-gebruikersnaam en -wachtwoord.",
+  "connectNoteApiKey": "Voeg deze catalogus toe aan een leesapp met OPDS-ondersteuning om je bibliotheek daar te bekijken en te streamen. Inloggen met een wachtwoord staat uit op deze server: log in met je gebruikersnaam en, als wachtwoord, een persoonlijke sleutel van <b>API-sleutel</b> op deze pagina.",
   "copy": "Kopiëren",
   "copied": "OPDS-URL gekopieerd.",
   "_shared": {

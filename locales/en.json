@@ -4,6 +4,7 @@
   "progressSyncNote": "Streaming a page from an OPDS app advances your resume point (never backwards); fetching the last page marks the issue read — the same record the built-in reader keeps. Whole-file downloads are unaffected (no progress channel exists for them). A client can opt out per-request with <code>?progress=0</code> on the stream URL.",
   "connectTitle": "Connect a reader app (OPDS)",
   "connectNote": "Add this catalog to an OPDS-capable reader app to browse and stream your library there. Sign in with your BackIssue username and password.",
+  "connectNoteApiKey": "Add this catalog to an OPDS-capable reader app to browse and stream your library there. Password sign-in is off on this server: sign in with your username and, as the password, a personal key from <b>API key</b> on this page.",
   "copy": "Copy",
   "copied": "OPDS URL copied.",
   "_shared": {

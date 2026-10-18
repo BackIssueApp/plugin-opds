@@ -4,6 +4,7 @@
   "progressSyncNote": "Transmitir una página desde una app OPDS adelanta tu punto de reanudación (nunca hacia atrás); obtener la última página marca el número como leído — el mismo registro que guarda el lector integrado. Las descargas de archivos completos no se ven afectadas (no existe un canal de progreso para ellas). Un cliente puede desactivarlo por petición con <code>?progress=0</code> en la URL de transmisión.",
   "connectTitle": "Conectar una app de lectura (OPDS)",
   "connectNote": "Añade este catálogo a una app de lectura compatible con OPDS para explorar y transmitir tu biblioteca desde ella. Inicia sesión con tu usuario y contraseña de BackIssue.",
+  "connectNoteApiKey": "Añade este catálogo a una aplicación de lectura compatible con OPDS para explorar y leer tu biblioteca allí. El inicio de sesión con contraseña está desactivado en este servidor: entra con tu nombre de usuario y, como contraseña, una clave personal de <b>Clave de API</b> en esta página.",
   "copy": "Copiar",
   "copied": "URL de OPDS copiada.",
   "_shared": {

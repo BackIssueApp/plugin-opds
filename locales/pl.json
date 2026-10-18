@@ -4,6 +4,7 @@
   "progressSyncNote": "Strumieniowanie strony z aplikacji OPDS przesuwa punkt wznowienia (nigdy wstecz); pobranie ostatniej strony oznacza zeszyt jako przeczytany — to ten sam zapis, który prowadzi wbudowany czytnik. Pobieranie całych plików nie ma na to wpływu (nie istnieje dla nich kanał postępu). Klient może z tego zrezygnować dla pojedynczego żądania, dodając <code>?progress=0</code> do adresu strumienia.",
   "connectTitle": "Połącz aplikację czytnika (OPDS)",
   "connectNote": "Dodaj ten katalog do aplikacji czytnika obsługującej OPDS, aby przeglądać i strumieniować tam swoją bibliotekę. Zaloguj się nazwą użytkownika i hasłem BackIssue.",
+  "connectNoteApiKey": "Dodaj ten katalog do aplikacji czytnika obsługującej OPDS, aby przeglądać i czytać w niej swoją bibliotekę. Logowanie hasłem jest na tym serwerze wyłączone: zaloguj się swoją nazwą użytkownika, a jako hasła użyj osobistego klucza z sekcji <b>Klucz API</b> na tej stronie.",
   "copy": "Kopiuj",
   "copied": "Skopiowano adres OPDS.",
   "_shared": {
