@@ -8,6 +8,13 @@ by the maintainers when changes merge, so concurrent PRs don't conflict here.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Hide mature content applies to the catalog.** An account that switched
+  mature content off for itself still saw flagged series in its reader app;
+  they are now left out, as on the web. Accounts signing in with a username and
+  password need BackIssue 0.9.2 or newer for this.
+
 ## [1.5.0] — 2026-10-17
 
 ### Added

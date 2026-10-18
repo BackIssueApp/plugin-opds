@@ -103,11 +103,12 @@ export default async function register(api) {
   const OPTS = { access: CAN, basicAuth: true };
 
   // Mature/restricted enforcement — a role without library.restricted sees no
-  // restricted series in the catalog, and can't download/stream their issues.
+  // restricted series in the catalog, and can't download/stream their issues;
+  // nor does an account that switched mature content off for itself.
   const permCatalog = new Map([...CORE_PERMISSIONS, ...registeredPermissions()].map((p) => [p.key, p]));
   const canRestricted = (req) => {
     if (!req.user || req.user.id === 0) return true;
-    try { return roleGrants(db, req.user.role, 'library.restricted', permCatalog); } catch { return false; }
+    try { return roleGrants(db, req.user.role, 'library.restricted', permCatalog) && !req.user.hide_mature; } catch { return false; }
   };
   // Books ride the ebooks plugin's own permission — the acquisition link points
   // at /api/ebooks/issue/:id/file (an ebooks.use route), so a reader who can't
