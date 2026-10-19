@@ -68,58 +68,89 @@ export function pageLinks(self, kind, page, size, total) {
   return out;
 }
 
-// ---- series queries ---------------------------------------------------------
-// Shared WHERE for "series that have at least one readable (valid, CV-matched)
-// file", plus optional restricted/search/publisher filters. Returns SQL text
-// and bound params so the row + count queries stay in lock-step.
-function seriesWhere({ includeRestricted = true, search = '', publisher = '' } = {}) {
-  const conds = [];
-  const params = [];
-  if (!includeRestricted) conds.push('s.restricted = 0');
-  if (search) { conds.push('COALESCE(cv.name, s.title) LIKE ?'); params.push('%' + search + '%'); }
-  if (publisher) { conds.push('COALESCE(cv.publisher, s.publisher) = ?'); params.push(publisher); }
-  return { where: conds.length ? 'WHERE ' + conds.join(' AND ') : '', params };
+// ---- short-lived memo -------------------------------------------------------
+// Catalog aggregates (which series have files, book id lists, author lists)
+// cost a pass over the whole library, and an OPDS app pages through them a
+// request at a time. They are kept per database handle for a minute — a new
+// file shows up in the catalog within that.
+export const MEMO_TTL_MS = 60_000;
+const MEMO_MAX = 32;
+const memos = new WeakMap(); // db → Map(key → { at, value })
+export function memo(db, key, fn, ttl = MEMO_TTL_MS) {
+  let m = memos.get(db);
+  if (!m) { m = new Map(); memos.set(db, m); }
+  const hit = m.get(key);
+  if (hit && Date.now() - hit.at < ttl) {
+    m.delete(key); m.set(key, hit); // most recently used last
+    return hit.value;
+  }
+  const value = fn();
+  m.delete(key);
+  m.set(key, { at: Date.now(), value });
+  while (m.size > MEMO_MAX) m.delete(m.keys().next().value);
+  return value;
 }
+/** Forget every memoized aggregate for this handle (tests, or after a write). */
+export function clearMemo(db) { memos.delete(db); }
+
+// ---- series queries ---------------------------------------------------------
+// Every series with at least one readable (valid, CV-matched) file, driven
+// from library_files (the plan no longer depends on table statistics) and
+// title-sorted once. Count, page, search and publisher facets all come from
+// this one snapshot instead of three joins over the series table per request.
+// Title prefers the ComicVine name; cover prefers CV art.
+function readableSeries(db) {
+  return memo(db, 'readable-series', () => db.prepare(`
+    SELECT s.id, COALESCE(cv.name, s.title) AS title, cv.start_year,
+           COALESCE(cv.image_url, s.cover_url) AS cover, f.issues,
+           COALESCE(cv.publisher, s.publisher) AS publisher, s.restricted
+      FROM (SELECT series_id, COUNT(DISTINCT cv_issue_id) AS issues FROM library_files
+             WHERE valid = 1 AND cv_issue_id IS NOT NULL AND series_id IS NOT NULL
+             GROUP BY series_id) f
+      JOIN series s ON s.id = f.series_id
+      LEFT JOIN cv_series cv ON cv.comicvine_id = s.cv_id
+     ORDER BY title COLLATE NOCASE, s.id`).all());
+}
+
+// SQLite's LIKE: % and _ wildcards, case-insensitive for ASCII letters only.
+const asciiLower = (s) => String(s).replace(/[A-Z]/g, (c) => c.toLowerCase());
+function likeMatcher(pattern) {
+  const src = asciiLower(pattern).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '[\\s\\S]*').replace(/_/g, '[\\s\\S]');
+  const re = new RegExp(`^${src}$`);
+  return (v) => v != null && re.test(asciiLower(v));
+}
+
+function filteredSeries(db, { includeRestricted = true, search = '', publisher = '' } = {}) {
+  let rows = readableSeries(db);
+  if (!includeRestricted) rows = rows.filter((s) => !s.restricted);
+  if (search) { const m = likeMatcher('%' + search + '%'); rows = rows.filter((s) => m(s.title)); }
+  if (publisher) rows = rows.filter((s) => s.publisher === publisher);
+  return rows;
+}
+
+const seriesOut = ({ id, title, start_year, cover, issues }) => ({ id, title, start_year, cover, issues });
 
 // Series page (title prefers the ComicVine name; cover prefers CV art).
 export function seriesRows(db, opts = {}) {
-  const { where, params } = seriesWhere(opts);
   const limit = opts.limit ?? PAGE_SIZE;
   const offset = opts.offset ?? 0;
-  return db.prepare(`
-    SELECT s.id, COALESCE(cv.name, s.title) AS title, cv.start_year,
-           COALESCE(cv.image_url, s.cover_url) AS cover,
-           COUNT(DISTINCT lf.cv_issue_id) AS issues
-      FROM series s
-      JOIN library_files lf ON lf.series_id = s.id AND lf.valid = 1 AND lf.cv_issue_id IS NOT NULL
-      LEFT JOIN cv_series cv ON cv.comicvine_id = s.cv_id
-     ${where}
-     GROUP BY s.id ORDER BY title COLLATE NOCASE LIMIT ? OFFSET ?`).all(...params, limit, offset);
+  return filteredSeries(db, opts).slice(offset, offset + limit).map(seriesOut);
 }
 
 export function seriesCount(db, opts = {}) {
-  const { where, params } = seriesWhere(opts);
-  const r = db.prepare(`
-    SELECT COUNT(DISTINCT s.id) AS n
-      FROM series s
-      JOIN library_files lf ON lf.series_id = s.id AND lf.valid = 1 AND lf.cv_issue_id IS NOT NULL
-      LEFT JOIN cv_series cv ON cv.comicvine_id = s.cv_id
-     ${where}`).get(...params);
-  return r ? r.n : 0;
+  return filteredSeries(db, opts).length;
 }
 
 // Publishers with at least one readable series (for the browse shelf + facets).
 export function publishers(db, { includeRestricted = true } = {}) {
-  const pub = 'COALESCE(cv.publisher, s.publisher)';
-  return db.prepare(`
-    SELECT ${pub} AS publisher, COUNT(DISTINCT s.id) AS count
-      FROM series s
-      JOIN library_files lf ON lf.series_id = s.id AND lf.valid = 1 AND lf.cv_issue_id IS NOT NULL
-      LEFT JOIN cv_series cv ON cv.comicvine_id = s.cv_id
-     WHERE ${pub} IS NOT NULL AND ${pub} <> ''
-       ${includeRestricted ? '' : 'AND s.restricted = 0'}
-     GROUP BY ${pub}
-     ORDER BY ${pub} COLLATE NOCASE`).all();
+  const counts = new Map();
+  for (const s of filteredSeries(db, { includeRestricted })) {
+    if (s.publisher == null || s.publisher === '') continue;
+    counts.set(s.publisher, (counts.get(s.publisher) || 0) + 1);
+  }
+  const key = (p) => asciiLower(p);
+  return [...counts].map(([publisher, count]) => ({ publisher, count }))
+    .sort((a, b) => (key(a.publisher) < key(b.publisher) ? -1 : key(a.publisher) > key(b.publisher) ? 1 : 0));
 }
 
 // Is a series (by our id) restricted? And is an issue's series restricted?
@@ -174,9 +205,24 @@ export function issueRows(db, seriesId, opts = {}) {
   return rows.sort(byIssueNumber);
 }
 
-// Most-recently-added readable issues, across the whole library.
+// Most-recently-added readable issues, across the whole library — ordered by
+// when each issue's newest copy landed. Walks the newest files (the reader's
+// idx_libfiles_newest partial index, which this plugin also creates) and
+// enriches just those, instead of grouping and best-file-ranking every file.
+// Duplicates and restricted series can leave the page short, so widen until
+// it fills or the files run out.
 export function recentIssues(db, { includeRestricted = true, limit = PAGE_SIZE } = {}) {
-  return issueRowsWhere(db, { includeRestricted, order: 'ORDER BY lf.mtime DESC, lf.cv_issue_id DESC', limit });
+  const walk = db.prepare(`SELECT lf.cv_issue_id AS id FROM library_files lf
+     WHERE lf.valid = 1 AND lf.cv_issue_id IS NOT NULL
+     ORDER BY lf.mtime DESC LIMIT ?`);
+  let rows = [];
+  for (let n = Math.max(limit * 2, 1); ; n *= 4) {
+    const files = walk.all(n);
+    const ids = [...new Set(files.map((r) => r.id))];
+    rows = issuesByIds(db, ids, { includeRestricted });
+    if (rows.length >= limit || files.length < n) break;
+  }
+  return rows.slice(0, limit);
 }
 
 // Enriched rows for a specific set of CV issue ids, returned in the given order.

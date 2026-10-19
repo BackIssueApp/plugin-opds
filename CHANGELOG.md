@@ -8,6 +8,27 @@ by the maintainers when changes merge, so concurrent PRs don't conflict here.
 
 ## [Unreleased]
 
+### Changed
+
+- **Faster browsing on big libraries.** The series list, search and
+  publisher facets no longer run three passes over the library for every
+  page an app loads; the list of series with files is worked out once a
+  minute and each page is cut from it (about 80 ms a page before, well under
+  1 ms now). A newly added series appears in the catalog within a minute.
+- **Recently added is quick.** It reads the newest files and stops, instead
+  of ranking every file in the library (about 180 ms at 100,000 files, under
+  1 ms now).
+- **The Books branch scales to large on-demand catalogs.** On a catalog of
+  hundreds of thousands of books, opening Books took about 5 seconds and
+  each page of All books 1 to 2 seconds. Checking whether there are any books
+  now stops at the first one, book counts and A to Z lists are kept for a
+  minute so paging reuses them, and Recently added reads the newest books
+  directly (with the ebooks plugin release that follows 0.4.0). **By author** and **By
+  series** are now paged like the other lists; before, they sent every
+  author or series in one response, tens of megabytes on a big catalog.
+- Downloads and page streaming no longer block on a file-system check before
+  sending; a file that has gone missing still gets a 404.
+
 ## [1.6.0] — 2026-10-18
 
 ### Changed

@@ -9,7 +9,6 @@
 // Point an app at:  http(s)://<host>/api/opds   with your BackIssue username
 // and password (HTTP Basic — the core verifies it against the users table).
 // Access rides the plugin-registered `opds.use` permission (viewer tier).
-import fs from 'node:fs';
 import Database from 'better-sqlite3';
 import config from '../../src/config.js';
 import {
@@ -24,7 +23,7 @@ import {
   bookSeriesDoc, booksBySeriesDoc, bookLibrariesDoc, booksByLibraryDoc, booksSearchDoc,
 } from './feeds2.js';
 import {
-  hasEbookTables, bookCount, booksRootNavFeed, allBooksFeed, recentBooksFeed,
+  hasEbookTables, hasBooks, booksRootNavFeed, allBooksFeed, recentBooksFeed,
   bookAuthorsNavFeed, booksByAuthorFeed, bookSeriesNavFeed, booksBySeriesFeed,
   bookLibrariesNavFeed, booksByLibraryFeed, booksSearchFeed, booksOpensearchDoc,
 } from './feeds-books.js';
@@ -52,6 +51,16 @@ export default async function register(api) {
   // through the reader plugin's own store below, never this connection.
   const db = new Database(config.dbPath, { readonly: true });
   try { db.pragma('busy_timeout = 5000'); } catch { /* readonly: best effort */ }
+
+  // "Recently added" walks the newest files through a small partial index —
+  // the same one the reader's New in library shelf uses (whichever plugin
+  // loads first creates it). A one-off writable handle, closed straight away;
+  // without it the feed still works, just with a sort over every file.
+  try {
+    const w = new Database(config.dbPath);
+    try { w.exec('CREATE INDEX IF NOT EXISTS idx_libfiles_newest ON library_files(mtime) WHERE valid = 1 AND cv_issue_id IS NOT NULL'); }
+    finally { w.close(); }
+  } catch { /* busy or an older core — the feed falls back to a sort */ }
 
   // The reader plugin's page pipeline (archive → page image, resize, cache).
   // Optional: without it the catalog still serves whole-file downloads.
@@ -120,8 +129,7 @@ export default async function register(api) {
   };
   // Show the Books branch only when this reader may use it AND at least one
   // book is visible to them.
-  const booksVisible = (req) => hasEbookTables(db) && canEbooks(req)
-    && bookCount(db, { includeRestricted: canRestricted(req) }) > 0;
+  const booksVisible = (req) => canEbooks(req) && hasBooks(db, { includeRestricted: canRestricted(req) });
   // Clamp a ?page param to a sane positive integer.
   const pageOf = (req) => Math.max(1, Number(req.query.page) || 1);
   const uid = (req) => (req.user && req.user.id) || 0;
@@ -223,7 +231,7 @@ export default async function register(api) {
   }, OPTS);
   api.registerRoute('get', '/api/opds/books/authors', (req, res) => {
     if (!bookGate(req, res)) return;
-    xml(res, NAV, bookAuthorsNavFeed(db, { includeRestricted: canRestricted(req) }));
+    xml(res, NAV, bookAuthorsNavFeed(db, { includeRestricted: canRestricted(req), page: pageOf(req) }));
   }, OPTS);
   api.registerRoute('get', '/api/opds/books/author/:name', (req, res) => {
     if (!bookGate(req, res)) return;
@@ -231,7 +239,7 @@ export default async function register(api) {
   }, OPTS);
   api.registerRoute('get', '/api/opds/books/series', (req, res) => {
     if (!bookGate(req, res)) return;
-    xml(res, NAV, bookSeriesNavFeed(db, { includeRestricted: canRestricted(req) }));
+    xml(res, NAV, bookSeriesNavFeed(db, { includeRestricted: canRestricted(req), page: pageOf(req) }));
   }, OPTS);
   api.registerRoute('get', '/api/opds/books/series/:id', (req, res) => {
     if (!bookGate(req, res)) return;
@@ -307,7 +315,7 @@ export default async function register(api) {
   }, OPTS);
   api.registerRoute('get', '/api/opds/v2/books/authors', (req, res) => {
     if (!bookGate(req, res)) return;
-    json(res, bookAuthorsDoc(db, { includeRestricted: canRestricted(req) }));
+    json(res, bookAuthorsDoc(db, { includeRestricted: canRestricted(req), page: pageOf(req) }));
   }, OPTS);
   api.registerRoute('get', '/api/opds/v2/books/author/:name', (req, res) => {
     if (!bookGate(req, res)) return;
@@ -315,7 +323,7 @@ export default async function register(api) {
   }, OPTS);
   api.registerRoute('get', '/api/opds/v2/books/series', (req, res) => {
     if (!bookGate(req, res)) return;
-    json(res, bookSeriesDoc(db, { includeRestricted: canRestricted(req) }));
+    json(res, bookSeriesDoc(db, { includeRestricted: canRestricted(req), page: pageOf(req) }));
   }, OPTS);
   api.registerRoute('get', '/api/opds/v2/books/series/:id', (req, res) => {
     if (!bookGate(req, res)) return;
@@ -339,7 +347,9 @@ export default async function register(api) {
   api.registerRoute('get', '/api/opds/issue/:id/file', (req, res) => {
     if (!canRestricted(req) && issueRestricted(db, Number(req.params.id))) return res.status(404).end();
     const f = bestFile(db, Number(req.params.id));
-    if (!f || !fs.existsSync(f.path)) return res.status(404).end();
+    if (!f) return res.status(404).end();
+    // No exists check first: sendFile stats the file anyway and reports a
+    // missing one to the callback below (a 404), without a blocking stat.
     const name = downloadName(db, Number(req.params.id), f.path);
     res.sendFile(f.path, {
       headers: {
@@ -356,7 +366,7 @@ export default async function register(api) {
     if (!canRestricted(req) && issueRestricted(db, Number(req.params.id))) return res.status(404).end();
     try {
       const f = bestFile(db, Number(req.params.id));
-      if (!f || !fs.existsSync(f.path)) return res.status(404).end();
+      if (!f) return res.status(404).end();
       const n = Number(req.params.n) | 0;
       const w = Number(req.query.width || req.query.w) | 0;
       // A page request is a reading signal (served fresh OR revalidated from
@@ -373,6 +383,10 @@ export default async function register(api) {
       res.set('ETag', etag);
       res.send(buffer);
       if (track) recordStreamedPage(uid(req), Number(req.params.id), n, f.page_count | 0);
-    } catch (e) { res.status(500).json({ error: String(e?.message || e) }); }
+    } catch (e) {
+      // The page pipeline reports a vanished file as 'file missing on disk'.
+      const missing = /file missing on disk/.test(String(e?.message || ''));
+      res.status(missing || e?.code === 'ENOPAGE' ? 404 : 500).json({ error: String(e?.message || e) });
+    }
   }, OPTS);
 }

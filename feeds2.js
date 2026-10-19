@@ -14,7 +14,7 @@ import {
   seriesRows, seriesCount, publishers, issueRows, seriesTitle, fileType, stripHtml, PAGE_SIZE,
 } from './feeds.js';
 import {
-  bookRows, bookCount, bookAuthors, bookSeries, ebookLibrariesList, bookMime,
+  bookRows, bookCount, bookAuthors, bookSeries, ebookLibrariesList, multipleBookLibraries, bookMime, RECENT_ORDER,
 } from './feeds-books.js';
 
 export const OPDS2 = 'application/opds+json';
@@ -210,7 +210,7 @@ export function booksRootDoc(db, { includeRestricted = true } = {}) {
     { title: 'By author', href: `${V2}/books/authors`, type: OPDS2, rel: 'subsection' },
     { title: 'By series', href: `${V2}/books/series`, type: OPDS2, rel: 'subsection' },
   ];
-  if (ebookLibrariesList(db, { includeRestricted }).length > 1) {
+  if (multipleBookLibraries(db, { includeRestricted })) {
     nav.push({ title: 'Libraries', href: `${V2}/books/libraries`, type: OPDS2, rel: 'subsection' });
   }
   return { metadata: { title: 'Books' }, links: [{ rel: 'self', href: `${V2}/books`, type: OPDS2 }], navigation: nav };
@@ -223,15 +223,18 @@ export function allBooksDoc(db, { includeRestricted = true, page = 1 } = {}) {
 }
 
 export function recentBooksDoc(db, { includeRestricted = true } = {}) {
-  const rows = bookRows(db, { includeRestricted, order: 'ORDER BY ef.added_at DESC, i.id DESC', limit: PAGE_SIZE });
+  const rows = bookRows(db, { includeRestricted, order: RECENT_ORDER, limit: PAGE_SIZE });
   return booksListDoc(rows, { title: 'Recently added books', self: `${V2}/books/recent` });
 }
 
-export function bookAuthorsDoc(db, { includeRestricted = true } = {}) {
-  const rows = bookAuthors(db, { includeRestricted });
+// Paged like the 1.2 feeds: tens of thousands of authors on a big catalog.
+export function bookAuthorsDoc(db, { includeRestricted = true, page = 1 } = {}) {
+  const all = bookAuthors(db, { includeRestricted });
+  const rows = all.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const self = `${V2}/books/authors`;
   return {
-    metadata: { title: 'Books by author', numberOfItems: rows.length },
-    links: [{ rel: 'self', href: `${V2}/books/authors`, type: OPDS2 }],
+    metadata: { title: 'Books by author', numberOfItems: all.length, itemsPerPage: PAGE_SIZE, currentPage: page },
+    links: [{ rel: 'self', href: self, type: OPDS2 }, ...pageLinks(self, page, PAGE_SIZE, all.length)],
     navigation: rows.map((a) => ({
       title: `${a.author} (${a.count})`, href: `${V2}/books/author/${encodeURIComponent(a.author)}`, type: OPDS2, rel: 'subsection',
     })),
@@ -245,11 +248,13 @@ export function booksByAuthorDoc(db, author, { includeRestricted = true, page = 
   return booksListDoc(rows, { title: author, self: `${V2}/books/author/${encodeURIComponent(author)}`, total, page });
 }
 
-export function bookSeriesDoc(db, { includeRestricted = true } = {}) {
-  const rows = bookSeries(db, { includeRestricted });
+export function bookSeriesDoc(db, { includeRestricted = true, page = 1 } = {}) {
+  const all = bookSeries(db, { includeRestricted });
+  const rows = all.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const self = `${V2}/books/series`;
   return {
-    metadata: { title: 'Book series', numberOfItems: rows.length },
-    links: [{ rel: 'self', href: `${V2}/books/series`, type: OPDS2 }],
+    metadata: { title: 'Book series', numberOfItems: all.length, itemsPerPage: PAGE_SIZE, currentPage: page },
+    links: [{ rel: 'self', href: self, type: OPDS2 }, ...pageLinks(self, page, PAGE_SIZE, all.length)],
     navigation: rows.map((s) => ({
       title: `${s.title}${s.year ? ` (${s.year})` : ''} (${s.count})`, href: `${V2}/books/series/${s.id}`, type: OPDS2, rel: 'subsection',
     })),

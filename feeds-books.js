@@ -13,7 +13,7 @@
 // Soft dependency: every query first checks that `ebooks_files` exists and is
 // wrapped in try/catch, so on a catalog without the ebooks plugin the whole
 // branch yields nothing (the catalog degrades to comics-only) and never errors.
-import { esc, stripHtml, head, pageLinks, now, NAV, ACQ, PAGE_SIZE } from './feeds.js';
+import { esc, stripHtml, head, pageLinks, now, memo, NAV, ACQ, PAGE_SIZE } from './feeds.js';
 
 const BASE = '/api/opds';
 const EB = '/api/ebooks'; // the ebooks plugin's own file + cover routes
@@ -47,29 +47,73 @@ const BOOK_SELECT = `
     JOIN ebooks_files ef ON ef.issue_id = i.id
    WHERE s.type = 'ebook'`;
 
+// The on-demand catalog can hold hundreds of thousands of books, so a feed
+// page is found in two steps: the ordered list of matching ebooks_files rows
+// (narrow — no descriptions, no per-row series count), kept for a minute so
+// paging and the total share it, then the full rows for just that page.
+// "Recently added" walks the ebooks plugin's added_at index instead and never
+// builds the list.
+export const RECENT_ORDER = 'ORDER BY ef.added_at DESC, i.id DESC';
+const restrictedCond = (includeRestricted) => (includeRestricted ? [] : ['s.restricted = 0']);
+
+function bookRowIds(db, { conds = [], params = [], order, includeRestricted = true }) {
+  const c = [...conds, ...restrictedCond(includeRestricted)];
+  const where = c.length ? ' AND ' + c.join(' AND ') : '';
+  const key = `books|${where}|${JSON.stringify(params)}|${order}`;
+  return memo(db, key, () => {
+    const st = db.prepare(`SELECT ef.rowid, i.title AS title
+      FROM series s JOIN issues i ON i.series_id = s.id JOIN ebooks_files ef ON ef.issue_id = i.id
+      WHERE s.type = 'ebook'${where} ${order}, ef.rowid`).raw();
+    const out = [];
+    for (const r of st.iterate(...params)) out.push(r[0]);
+    return Int32Array.from(out);
+  });
+}
+
+function recentRowIds(db, { conds = [], params = [], limit, offset, includeRestricted }) {
+  const c = ["s.type = 'ebook'", ...conds, ...restrictedCond(includeRestricted)];
+  return db.prepare(`SELECT ef.rowid FROM ebooks_files ef
+    WHERE EXISTS (SELECT 1 FROM issues i JOIN series s ON s.id = i.series_id
+                   WHERE i.id = ef.issue_id AND ${c.join(' AND ')})
+    ORDER BY ef.added_at DESC, ef.issue_id DESC LIMIT ? OFFSET ?`).raw().all(...params, limit, offset).map((r) => r[0]);
+}
+
 export function bookRows(db, { conds = [], params = [], order = 'ORDER BY title COLLATE NOCASE', limit = PAGE_SIZE, offset = 0, includeRestricted = true } = {}) {
   if (!hasEbookTables(db)) return [];
-  const c = [...conds];
-  if (!includeRestricted) c.push('s.restricted = 0');
-  const where = c.length ? ' AND ' + c.join(' AND ') : '';
   try {
-    return db.prepare(`${BOOK_SELECT}${where} ${order} LIMIT ? OFFSET ?`).all(...params, limit, offset);
+    const ids = order === RECENT_ORDER
+      ? recentRowIds(db, { conds, params, limit, offset, includeRestricted })
+      : [...bookRowIds(db, { conds, params, order, includeRestricted }).subarray(offset, offset + limit)];
+    if (!ids.length) return [];
+    const pos = new Map(ids.map((id, n) => [id, n]));
+    return db.prepare(`${BOOK_SELECT.replace('SELECT', 'SELECT ef.rowid AS _rid,')} AND ef.rowid IN (${ids.map(() => '?').join(',')})`)
+      .all(...ids)
+      .sort((a, b) => pos.get(a._rid) - pos.get(b._rid))
+      .map(({ _rid, ...row }) => row);
   } catch { return []; }
 }
 
 export function bookCount(db, { conds = [], params = [], includeRestricted = true } = {}) {
   if (!hasEbookTables(db)) return 0;
-  const c = [...conds];
-  if (!includeRestricted) c.push('s.restricted = 0');
-  const where = c.length ? ' AND ' + c.join(' AND ') : '';
-  try {
-    const r = db.prepare(`SELECT COUNT(*) n FROM series s
-      JOIN issues i ON i.series_id = s.id
-      JOIN ebooks_files ef ON ef.issue_id = i.id
-      WHERE s.type = 'ebook'${where}`).get(...params);
-    return r ? r.n : 0;
-  } catch { return 0; }
+  try { return bookRowIds(db, { conds, params, order: 'ORDER BY title COLLATE NOCASE', includeRestricted }).length; }
+  catch { return 0; }
 }
+
+/** Is at least one book visible? (The root menus only need yes/no.) */
+export function hasBooks(db, { includeRestricted = true } = {}) {
+  if (!hasEbookTables(db)) return false;
+  try {
+    return !!db.prepare(`SELECT 1 FROM series s
+      WHERE s.type = 'ebook'${includeRestricted ? '' : ' AND s.restricted = 0'}
+        AND EXISTS (SELECT 1 FROM issues i JOIN ebooks_files ef ON ef.issue_id = i.id WHERE i.series_id = s.id)
+      LIMIT 1`).get();
+  } catch { return false; }
+}
+
+// Every book row joined from ebooks_files outward (one pass, no Bloom filter
+// over the series table), for the grouped lists below.
+const FROM_FILES = `FROM ebooks_files ef CROSS JOIN issues i ON i.id = ef.issue_id
+  CROSS JOIN series s ON s.id = i.series_id WHERE s.type = 'ebook'`;
 
 // Author bylines (series.publisher slot) with a book count, for the "By author"
 // browse. Grouped by the whole byline string, mirroring the comic publisher
@@ -78,10 +122,9 @@ export function bookAuthors(db, { includeRestricted = true } = {}) {
   if (!hasEbookTables(db)) return [];
   const restr = includeRestricted ? '' : ' AND s.restricted = 0';
   try {
-    return db.prepare(`SELECT s.publisher AS author, COUNT(*) AS count
-      FROM series s JOIN issues i ON i.series_id = s.id JOIN ebooks_files ef ON ef.issue_id = i.id
-      WHERE s.type = 'ebook' AND s.publisher IS NOT NULL AND s.publisher <> ''${restr}
-      GROUP BY s.publisher ORDER BY s.publisher COLLATE NOCASE`).all();
+    return memo(db, `book-authors|${restr}`, () => db.prepare(`SELECT s.publisher AS author, COUNT(*) AS count
+      ${FROM_FILES} AND s.publisher IS NOT NULL AND s.publisher <> ''${restr}
+      GROUP BY s.publisher ORDER BY s.publisher COLLATE NOCASE`).all());
   } catch { return []; }
 }
 
@@ -91,10 +134,10 @@ export function bookSeries(db, { includeRestricted = true } = {}) {
   if (!hasEbookTables(db)) return [];
   const restr = includeRestricted ? '' : ' AND s.restricted = 0';
   try {
-    return db.prepare(`SELECT s.id, s.title, s.year, COUNT(*) AS count
+    return memo(db, `book-series|${restr}`, () => db.prepare(`SELECT s.id, s.title, s.year, COUNT(*) AS count
       FROM series s JOIN issues i ON i.series_id = s.id JOIN ebooks_files ef ON ef.issue_id = i.id
       WHERE s.type = 'ebook'${restr}
-      GROUP BY s.id HAVING COUNT(*) >= 2 ORDER BY s.title COLLATE NOCASE`).all();
+      GROUP BY s.id HAVING COUNT(*) >= 2 ORDER BY s.title COLLATE NOCASE`).all());
   } catch { return []; }
 }
 
@@ -104,14 +147,23 @@ export function ebookLibrariesList(db, { includeRestricted = true } = {}) {
   if (!hasEbookTables(db)) return [];
   const restr = includeRestricted ? '' : ' AND s.restricted = 0';
   try {
-    return db.prepare(`SELECT l.id, l.name, COUNT(*) AS count
-      FROM libraries l
-      JOIN series s ON s.library_id = l.id AND s.type = 'ebook'
-      JOIN issues i ON i.series_id = s.id
-      JOIN ebooks_files ef ON ef.issue_id = i.id
-      WHERE 1 = 1${restr}
-      GROUP BY l.id ORDER BY l.name COLLATE NOCASE`).all();
+    return memo(db, `book-libraries|${restr}`, () => db.prepare(`SELECT l.id, l.name, c.count
+      FROM (SELECT s.library_id AS lid, COUNT(*) AS count ${FROM_FILES}${restr} GROUP BY s.library_id) c
+      JOIN libraries l ON l.id = c.lid
+      ORDER BY l.name COLLATE NOCASE`).all());
   } catch { return []; }
+}
+
+/** More than one ebook library with books in it? (The Books menu only shows
+ *  the Libraries entry then.) A per-library existence probe, not a count. */
+export function multipleBookLibraries(db, { includeRestricted = true } = {}) {
+  if (!hasEbookTables(db)) return false;
+  const restr = includeRestricted ? '' : ' AND s.restricted = 0';
+  try {
+    return db.prepare(`SELECT l.id FROM libraries l WHERE EXISTS (
+        SELECT 1 FROM series s JOIN issues i ON i.series_id = s.id JOIN ebooks_files ef ON ef.issue_id = i.id
+         WHERE s.library_id = l.id AND s.type = 'ebook'${restr}) LIMIT 2`).all().length > 1;
+  } catch { return false; }
 }
 
 // ---- entry + feeds ----------------------------------------------------------
@@ -166,7 +218,7 @@ export function booksRootNavFeed(db, { includeRestricted = true } = {}) {
     entry('By author', 'opds:books:authors', 'Browse books by author', `${BASE}/books/authors`),
     entry('By series', 'opds:books:series', 'Browse multi-book series', `${BASE}/books/series`),
   ];
-  if (ebookLibrariesList(db, { includeRestricted }).length > 1) {
+  if (multipleBookLibraries(db, { includeRestricted })) {
     entries.push(entry('Libraries', 'opds:books:libraries', 'Browse by book library', `${BASE}/books/libraries`));
   }
   return bhead('opds:books', 'Books', `${BASE}/books`, NAV) + entries.join('\n') + '\n</feed>';
@@ -179,12 +231,15 @@ export function allBooksFeed(db, { includeRestricted = true, page = 1 } = {}) {
 }
 
 export function recentBooksFeed(db, { includeRestricted = true } = {}) {
-  const rows = bookRows(db, { includeRestricted, order: 'ORDER BY ef.added_at DESC, i.id DESC', limit: PAGE_SIZE });
+  const rows = bookRows(db, { includeRestricted, order: RECENT_ORDER, limit: PAGE_SIZE });
   return booksAcqFeed(rows, { id: 'opds:books:recent', title: 'Recently added books', self: `${BASE}/books/recent` });
 }
 
-export function bookAuthorsNavFeed(db, { includeRestricted = true } = {}) {
-  const rows = bookAuthors(db, { includeRestricted });
+// The author and series lists run to tens of thousands of entries on a big
+// catalog, so they are paged like every other list.
+export function bookAuthorsNavFeed(db, { includeRestricted = true, page = 1 } = {}) {
+  const all = bookAuthors(db, { includeRestricted });
+  const rows = all.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const entries = rows.map((a) => `  <entry>
     <title>${esc(a.author)}</title>
     <id>backissue:opds:books:author:${esc(a.author)}</id>
@@ -192,7 +247,9 @@ export function bookAuthorsNavFeed(db, { includeRestricted = true } = {}) {
     <content type="text">${a.count} book${a.count === 1 ? '' : 's'}</content>
     <link rel="subsection" href="${BASE}/books/author/${encodeURIComponent(a.author)}" type="${ACQ}"/>
   </entry>`).join('\n');
-  return bhead('opds:books:authors', 'Books by author', `${BASE}/books/authors`, NAV) + entries + '\n</feed>';
+  const self = `${BASE}/books/authors`;
+  return bhead('opds:books:authors', 'Books by author', self, NAV)
+    + pageLinks(self, NAV, page, PAGE_SIZE, all.length) + entries + '\n</feed>';
 }
 
 export function booksByAuthorFeed(db, author, { includeRestricted = true, page = 1 } = {}) {
@@ -202,8 +259,9 @@ export function booksByAuthorFeed(db, author, { includeRestricted = true, page =
   return booksAcqFeed(rows, { id: `opds:books:author:${author}`, title: author, self: `${BASE}/books/author/${encodeURIComponent(author)}`, page, total });
 }
 
-export function bookSeriesNavFeed(db, { includeRestricted = true } = {}) {
-  const rows = bookSeries(db, { includeRestricted });
+export function bookSeriesNavFeed(db, { includeRestricted = true, page = 1 } = {}) {
+  const all = bookSeries(db, { includeRestricted });
+  const rows = all.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const entries = rows.map((s) => `  <entry>
     <title>${esc(s.title)}${s.year ? esc(` (${s.year})`) : ''}</title>
     <id>backissue:opds:books:series:${s.id}</id>
@@ -211,7 +269,9 @@ export function bookSeriesNavFeed(db, { includeRestricted = true } = {}) {
     <content type="text">${s.count} book${s.count === 1 ? '' : 's'}</content>
     <link rel="subsection" href="${BASE}/books/series/${s.id}" type="${ACQ}"/>
   </entry>`).join('\n');
-  return bhead('opds:books:series', 'Book series', `${BASE}/books/series`, NAV) + entries + '\n</feed>';
+  const self = `${BASE}/books/series`;
+  return bhead('opds:books:series', 'Book series', self, NAV)
+    + pageLinks(self, NAV, page, PAGE_SIZE, all.length) + entries + '\n</feed>';
 }
 
 // A calibre series' books, ordered by series index (issue number). null when
