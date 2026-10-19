@@ -8,6 +8,8 @@ by the maintainers when changes merge, so concurrent PRs don't conflict here.
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-10-19
+
 ### Changed
 
 - **Books by author open quickly.** An author's books are found through an
