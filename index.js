@@ -58,7 +58,12 @@ export default async function register(api) {
   // without it the feed still works, just with a sort over every file.
   try {
     const w = new Database(config.dbPath);
-    try { w.exec('CREATE INDEX IF NOT EXISTS idx_libfiles_newest ON library_files(mtime) WHERE valid = 1 AND cv_issue_id IS NOT NULL'); }
+    try {
+      w.exec('CREATE INDEX IF NOT EXISTS idx_libfiles_newest ON library_files(mtime) WHERE valid = 1 AND cv_issue_id IS NOT NULL');
+      // "By author" looks books up by the publisher slot. Core creates this
+      // same index from the next release on; created here for older cores.
+      w.exec('CREATE INDEX IF NOT EXISTS idx_series_publisher ON series(publisher)');
+    }
     finally { w.close(); }
   } catch { /* busy or an older core — the feed falls back to a sort */ }
 

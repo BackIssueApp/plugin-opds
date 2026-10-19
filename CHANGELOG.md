@@ -10,6 +10,9 @@ by the maintainers when changes merge, so concurrent PRs don't conflict here.
 
 ### Changed
 
+- **Books by author open quickly.** An author's books are found through an
+  index instead of reading every series (about 150 ms before, about 1 ms now
+  with 140,000 books).
 - **Faster browsing on big libraries.** The series list, search and
   publisher facets no longer run three passes over the library for every
   page an app loads; the list of series with files is worked out once a
