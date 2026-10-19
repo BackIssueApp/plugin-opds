@@ -8,6 +8,8 @@ by the maintainers when changes merge, so concurrent PRs don't conflict here.
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-10-18
+
 ### Changed
 
 - **The Profile card says to use an API key when passwords are off.** On a
